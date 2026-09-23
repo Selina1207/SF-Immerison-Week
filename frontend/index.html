@@ -238,11 +238,12 @@
       showProgress();
       timer = setInterval(showProgress, 1000);
 
-      const { clauses, saved } = await analyze(text, file.name);
+      const { clauses, saved, provider } = await analyze(text, file.name);
       clearInterval(timer);
       const seconds = Math.round((Date.now() - startedAt) / 1000);
+      const source = provider === 'cloudflare' ? ' Answered by Cloudflare AI (NVIDIA was too slow).' : ' Answered by NVIDIA.';
       renderResults(clauses);
-      setStatus(`Done in ${seconds}s.${saved ? ' Saved to the database.' : ''}`);
+      setStatus(`Done in ${seconds}s.${source}${saved ? ' Saved to the database.' : ''}`);
     } catch (err) {
       clearInterval(timer);
       setStatus('Error: ' + escHtml(err.message));

@@ -36,7 +36,8 @@ Reply with ONLY a JSON array, no other text. Each element is an object with thes
 "explanation": one or two plain-English sentences on what the patient gives up
 "risk": "high", "medium", or "low"
 
-Every quote must be real text from the document. If nothing qualifies, reply with [].`;
+Every quote must be real text from the document. If nothing qualifies, reply with [].
+/no_think`;
 
   const upstream = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -50,7 +51,7 @@ Every quote must be real text from the document. If nothing qualifies, reply wit
         { role: 'system', content: system },
         { role: 'user', content: `Document:\n\n${text}` },
       ],
-      max_tokens: 2048,
+      max_tokens: 4096,
       temperature: 0.1,
       stream: true,
     }),
@@ -70,6 +71,7 @@ Every quote must be real text from the document. If nothing qualifies, reply wit
     const reader = upstream.body.getReader();
     let buffer = '';
     let fullText = '';
+    let finishReason = null;
 
     try {
       while (true) {
@@ -86,13 +88,14 @@ Every quote must be real text from the document. If nothing qualifies, reply wit
           if (data === '[DONE]') continue;
           try {
             const json = JSON.parse(data);
-            const delta = json.choices?.[0]?.delta?.content;
-            if (delta) fullText += delta;
+            const choice = json.choices?.[0];
+            if (choice?.delta?.content) fullText += choice.delta.content;
+            if (choice?.finish_reason) finishReason = choice.finish_reason;
           } catch {}
         }
       }
 
-      const result = parseClauses(fullText);
+      const result = parseClauses(fullText, finishReason);
       if (result.clauses) {
         result.saved = await saveAnalysis(env, documentName, text, fullText, result.clauses);
       }
@@ -110,23 +113,19 @@ Every quote must be real text from the document. If nothing qualifies, reply wit
   });
 }
 
-function parseClauses(raw) {
-  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/g, '');
-  const start = cleaned.indexOf('[');
-  const end = cleaned.lastIndexOf(']');
-  if (start === -1 || end <= start) {
-    return { error: 'The AI did not return a readable answer. Please try again.' };
-  }
-
-  let items;
-  try {
-    items = JSON.parse(cleaned.slice(start, end + 1));
-  } catch {
-    return { error: 'The AI did not return a readable answer. Please try again.' };
+function parseClauses(raw, finishReason) {
+  const items = extractAnswerArray(raw);
+  if (!items) {
+    console.error('Unreadable AI reply', { finishReason, length: raw.length, tail: raw.slice(-1500) });
+    const error =
+      finishReason === 'length'
+        ? 'The AI ran out of room before finishing. Try a shorter PDF.'
+        : 'The AI did not return a readable answer. Please try again.';
+    return { error };
   }
 
   const isPlaceholder = (s) => /^\s*\[.*\]\s*$/.test(s);
-  const clauses = (Array.isArray(items) ? items : [])
+  const clauses = items
     .map((c) => ({
       quote: String(c?.quote ?? '').trim(),
       right: String(c?.right ?? '').trim(),
@@ -136,6 +135,22 @@ function parseClauses(raw) {
     .filter((c) => c.right && c.explanation && !isPlaceholder(c.right) && !isPlaceholder(c.explanation));
 
   return { clauses };
+}
+
+// The answer is the JSON array at the end of the reply; reasoning before it may contain stray brackets.
+function extractAnswerArray(raw) {
+  const thinkEnd = raw.lastIndexOf('</think>');
+  const text = thinkEnd === -1 ? raw : raw.slice(thinkEnd + '</think>'.length);
+  const end = text.lastIndexOf(']');
+  if (end === -1) return null;
+
+  for (let start = text.indexOf('['); start !== -1 && start < end; start = text.indexOf('[', start + 1)) {
+    try {
+      const value = JSON.parse(text.slice(start, end + 1));
+      if (Array.isArray(value)) return value;
+    } catch {}
+  }
+  return null;
 }
 
 function normalizeRisk(value) {

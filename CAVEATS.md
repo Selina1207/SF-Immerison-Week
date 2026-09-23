@@ -10,7 +10,7 @@
 | Saving | Each analysis and its clauses are saved to Supabase. There is no screen to view past analyses yet. |
 | Login | None. Anyone with the URL can use it, and all results go into one shared database. |
 | Privacy | Analyzed document text is stored. Do not upload real patient documents; use blank or sample forms. |
-| Speed | A run can take 10–60 seconds, shown only as a spinner. |
+| Speed | Depends on NVIDIA's free servers. The page counts seconds; if NVIDIA hasn't finished in 5 minutes (or errors sooner), Cloudflare's own AI answers instead. |
 | Model availability | Free NVIDIA endpoint. Two models were retired mid-build; this one may be too. |
 | Usage limits | No rate limit, so heavy use could run out NVIDIA free credits. |
 | Testing | Checked by hand on a small number of sample PDFs. No automated tests. |

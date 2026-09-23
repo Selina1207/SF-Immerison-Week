@@ -38,7 +38,7 @@ Reply with ONLY a JSON array, no other text. Each element is an object with thes
 Every quote must be real text from the document. If nothing qualifies, reply with [].`;
 
 const NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
-const NVIDIA_TIME_LIMIT_MS = 30000;
+const NVIDIA_TIME_LIMIT_MS = 300000;
 const BACKUP_MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
 
 // The response starts right away so the browser connection never sits idle while the AI works.

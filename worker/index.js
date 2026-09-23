@@ -7,11 +7,12 @@ export default {
       if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
 
       try {
-        const { text } = await request.json();
+        const { text, documentName } = await request.json();
         if (!text || text.trim().length === 0) {
           return jsonResponse({ error: 'No text provided' }, 400);
         }
-        return await streamAnalysis(text, env.NVIDIA_API_KEY);
+        const name = String(documentName || '').trim() || 'untitled.pdf';
+        return await streamAnalysis(text.slice(0, 6000), name, env);
       } catch (err) {
         return jsonResponse({ error: err.message }, 500);
       }
@@ -21,7 +22,7 @@ export default {
   },
 };
 
-async function streamAnalysis(text, apiKey) {
+async function streamAnalysis(text, documentName, env) {
   const system = `You review hospital admission documents for patient advocates. Find every clause in the document that waives or limits a patient's rights, such as:
 - arbitration agreements or waivers of the right to sue or join a class action
 - limits on the hospital's liability for negligence or malpractice
@@ -40,14 +41,14 @@ Every quote must be real text from the document. If nothing qualifies, reply wit
   const upstream = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${env.NVIDIA_API_KEY}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
       model: 'nvidia/nemotron-3.5-lightning-30b-a3b',
       messages: [
         { role: 'system', content: system },
-        { role: 'user', content: `Document:\n\n${text.slice(0, 6000)}` },
+        { role: 'user', content: `Document:\n\n${text}` },
       ],
       max_tokens: 2048,
       temperature: 0.1,
@@ -91,7 +92,11 @@ Every quote must be real text from the document. If nothing qualifies, reply wit
         }
       }
 
-      await writer.write(encoder.encode(JSON.stringify(parseClauses(fullText))));
+      const result = parseClauses(fullText);
+      if (result.clauses) {
+        result.saved = await saveAnalysis(env, documentName, text, fullText, result.clauses);
+      }
+      await writer.write(encoder.encode(JSON.stringify(result)));
     } finally {
       await writer.close();
     }
@@ -126,11 +131,64 @@ function parseClauses(raw) {
       quote: String(c?.quote ?? '').trim(),
       right: String(c?.right ?? '').trim(),
       explanation: String(c?.explanation ?? '').trim(),
-      risk: String(c?.risk ?? '').trim().toLowerCase(),
+      risk: normalizeRisk(c?.risk),
     }))
     .filter((c) => c.right && c.explanation && !isPlaceholder(c.right) && !isPlaceholder(c.explanation));
 
   return { clauses };
+}
+
+function normalizeRisk(value) {
+  const risk = String(value ?? '').trim().toLowerCase();
+  return ['high', 'medium', 'low'].includes(risk) ? risk : 'medium';
+}
+
+async function saveAnalysis(env, documentName, text, aiResponse, clauses) {
+  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return false;
+
+  const base = `${env.SUPABASE_URL.replace(/\/+$/, '')}/rest/v1`;
+  const headers = { apikey: env.SUPABASE_SERVICE_KEY, 'Content-Type': 'application/json' };
+  // Legacy service_role keys are JWTs and go in Authorization too; new sb_secret_ keys must not.
+  if (env.SUPABASE_SERVICE_KEY.startsWith('eyJ')) {
+    headers.Authorization = `Bearer ${env.SUPABASE_SERVICE_KEY}`;
+  }
+
+  try {
+    const analysisRes = await fetch(`${base}/analyses`, {
+      method: 'POST',
+      headers: { ...headers, Prefer: 'return=representation' },
+      body: JSON.stringify({ document_name: documentName, raw_text: text, ai_response: aiResponse }),
+    });
+    if (!analysisRes.ok) {
+      console.error('Supabase analyses insert failed', analysisRes.status, await analysisRes.text());
+      return false;
+    }
+    const [analysis] = await analysisRes.json();
+
+    if (clauses.length === 0) return true;
+
+    const clausesRes = await fetch(`${base}/clauses`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(
+        clauses.map((c) => ({
+          analysis_id: analysis.id,
+          right_affected: c.right,
+          clause_text: c.quote || null,
+          plain_english: c.explanation,
+          risk_level: c.risk,
+        }))
+      ),
+    });
+    if (!clausesRes.ok) {
+      console.error('Supabase clauses insert failed', clausesRes.status, await clausesRes.text());
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error('Supabase save failed', err);
+    return false;
+  }
 }
 
 function jsonResponse(body, status = 200) {

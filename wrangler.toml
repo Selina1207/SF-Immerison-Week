@@ -2,8 +2,13 @@ name = "patient-rights-analyzer"
 main = "worker/index.js"
 compatibility_date = "2024-09-23"
 
-# Set your secret with: wrangler secret put NVIDIA_API_KEY
+# Set secrets with:
+#   wrangler secret put NVIDIA_API_KEY
+#   wrangler secret put SUPABASE_SERVICE_KEY
 # Then deploy with: wrangler deploy
+
+[vars]
+SUPABASE_URL = "https://wljsozvipckmojqitunh.supabase.co"
 
 [assets]
 directory = "./frontend"

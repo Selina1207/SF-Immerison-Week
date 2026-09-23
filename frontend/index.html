@@ -230,9 +230,9 @@
       }
 
       setStatus('<span class="spinner"></span>Analyzing for rights-waiver clauses…');
-      const analysis = await analyze(text);
-      renderResults(analysis);
-      setStatus('');
+      const { clauses, saved } = await analyze(text, file.name);
+      renderResults(clauses);
+      setStatus(saved ? 'Saved to the database.' : '');
     } catch (err) {
       setStatus('Error: ' + err.message);
     }
@@ -250,15 +250,15 @@
     return text;
   }
 
-  async function analyze(text) {
+  async function analyze(text, documentName) {
     const res = await fetch(WORKER_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, documentName }),
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    return data.clauses;
+    return data;
   }
 
   function renderResults(clauses) {

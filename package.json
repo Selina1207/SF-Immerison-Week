@@ -1,0 +1,9 @@
+{
+  "name": "patient-rights-analyzer",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "echo \"No build step: the Worker and frontend are served as-is.\"",
+    "deploy": "wrangler deploy"
+  }
+}

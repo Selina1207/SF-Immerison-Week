@@ -55,7 +55,10 @@ RISK LEVEL: [High / Medium / Low]
 If no rights-waiver clauses are found, say: "No rights-waiver clauses identified."
 
 Document text:
-${text.slice(0, 12000)}`;
+${text.slice(0, 6000)}`;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 25000);
 
   const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -66,10 +69,13 @@ ${text.slice(0, 12000)}`;
     body: JSON.stringify({
       model: 'deepseek-ai/deepseek-v4.1-flash',
       messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2048,
+      max_tokens: 1024,
       temperature: 0.1,
     }),
+    signal: controller.signal,
   });
+
+  clearTimeout(timeout);
 
   if (!response.ok) {
     const err = await response.text();

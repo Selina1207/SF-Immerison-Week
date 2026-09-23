@@ -34,27 +34,20 @@ export default {
 };
 
 async function streamAnalysis(text, apiKey) {
-  const prompt = `You are a legal analyst helping hospital patient advocates identify clauses in hospital admission documents that waive or limit patient rights.
+  const system = `You review hospital admission documents for patient advocates. Find every clause in the document that waives or limits a patient's rights, such as:
+- arbitration agreements or waivers of the right to sue or join a class action
+- limits on the hospital's liability for negligence or malpractice
+- broad consent to share or release medical information
+- waivers of statutory patient rights
+- financial assignments or guarantees that take away patient protections
 
-Analyze the following hospital admission document and identify ALL clauses that waive or limit patient rights, including:
-- Arbitration agreements or waivers of the right to sue
-- Liability limitations for negligence or malpractice
-- Broad consent to data sharing or release of medical information without restriction
-- Waivers of specific statutory patient rights
-- Assignment of financial benefits or obligations that affect patient rights
+Reply with ONLY a JSON array, no other text. Each element is an object with these keys:
+"quote": the clause copied word-for-word from the document
+"right": short name of the right being waived or limited
+"explanation": one or two plain-English sentences on what the patient gives up
+"risk": "high", "medium", or "low"
 
-For each clause found, respond using EXACTLY this format (repeat for each clause):
-
-CLAUSE: [exact text or key excerpt from the document]
-RIGHT AFFECTED: [the specific right being waived or limited]
-PLAIN ENGLISH: [1-2 sentence explanation a non-lawyer can understand]
-RISK LEVEL: [High / Medium / Low]
----
-
-If no rights-waiver clauses are found, say: "No rights-waiver clauses identified."
-
-Document text:
-${text.slice(0, 6000)}`;
+Every quote must be real text from the document. If nothing qualifies, reply with [].`;
 
   const upstream = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -64,8 +57,11 @@ ${text.slice(0, 6000)}`;
     },
     body: JSON.stringify({
       model: 'nvidia/nemotron-3.5-lightning-30b-a3b',
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 1024,
+      messages: [
+        { role: 'system', content: system },
+        { role: 'user', content: `Document:\n\n${text.slice(0, 6000)}` },
+      ],
+      max_tokens: 2048,
       temperature: 0.1,
       stream: true,
     }),
@@ -107,7 +103,7 @@ ${text.slice(0, 6000)}`;
         }
       }
 
-      await writer.write(encoder.encode(JSON.stringify({ analysis: fullText })));
+      await writer.write(encoder.encode(JSON.stringify(parseClauses(fullText))));
     } finally {
       await writer.close();
     }
@@ -119,6 +115,34 @@ ${text.slice(0, 6000)}`;
       'Access-Control-Allow-Origin': '*',
     },
   });
+}
+
+function parseClauses(raw) {
+  const cleaned = raw.replace(/<think>[\s\S]*?<\/think>/g, '');
+  const start = cleaned.indexOf('[');
+  const end = cleaned.lastIndexOf(']');
+  if (start === -1 || end <= start) {
+    return { error: 'The AI did not return a readable answer. Please try again.' };
+  }
+
+  let items;
+  try {
+    items = JSON.parse(cleaned.slice(start, end + 1));
+  } catch {
+    return { error: 'The AI did not return a readable answer. Please try again.' };
+  }
+
+  const isPlaceholder = (s) => /^\s*\[.*\]\s*$/.test(s);
+  const clauses = (Array.isArray(items) ? items : [])
+    .map((c) => ({
+      quote: String(c?.quote ?? '').trim(),
+      right: String(c?.right ?? '').trim(),
+      explanation: String(c?.explanation ?? '').trim(),
+      risk: String(c?.risk ?? '').trim().toLowerCase(),
+    }))
+    .filter((c) => c.right && c.explanation && !isPlaceholder(c.right) && !isPlaceholder(c.explanation));
+
+  return { clauses };
 }
 
 function jsonResponse(body, status = 200) {

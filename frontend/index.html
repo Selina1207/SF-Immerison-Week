@@ -258,13 +258,10 @@
     });
     const data = await res.json();
     if (data.error) throw new Error(data.error);
-    return data.analysis;
+    return data.clauses;
   }
 
-  function renderResults(raw) {
-    const blocks = raw.split('---').map(b => b.trim()).filter(Boolean);
-    const clauses = blocks.map(parseClause).filter(Boolean);
-
+  function renderResults(clauses) {
     if (clauses.length === 0) {
       results.innerHTML = '<div class="no-clauses">✓ No rights-waiver clauses identified in this document.</div>';
       return;
@@ -275,28 +272,14 @@
     results.innerHTML = header + cards;
   }
 
-  function parseClause(block) {
-    const get = (label) => {
-      const re = new RegExp(`${label}:\\s*(.+?)(?=\\n[A-Z ]+:|$)`, 'si');
-      const m = block.match(re);
-      return m ? m[1].trim() : '';
-    };
-    const clause = get('CLAUSE');
-    const right = get('RIGHT AFFECTED');
-    const plain = get('PLAIN ENGLISH');
-    const risk = get('RISK LEVEL');
-    if (!right && !plain) return null;
-    return { clause, right, plain, risk: risk.toLowerCase() };
-  }
-
-  function renderCard({ clause, right, plain, risk }) {
+  function renderCard({ quote, right, explanation, risk }) {
     const level = ['high', 'medium', 'low'].includes(risk) ? risk : 'medium';
     return `
       <div class="clause-card ${level}">
         <span class="risk-badge ${level}">${level} risk</span>
         <div class="clause-right">${escHtml(right)}</div>
-        ${clause ? `<div class="clause-text">"${escHtml(clause)}"</div>` : ''}
-        <div class="clause-plain">${escHtml(plain)}</div>
+        ${quote ? `<div class="clause-text">"${escHtml(quote)}"</div>` : ''}
+        <div class="clause-plain">${escHtml(explanation)}</div>
       </div>`;
   }
 

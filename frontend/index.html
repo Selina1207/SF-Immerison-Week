@@ -245,7 +245,10 @@
       setStatus(`Done in ${seconds}s.${saved ? ' Saved to the database.' : ''}`);
     } catch (err) {
       clearInterval(timer);
-      setStatus('Error: ' + err.message);
+      setStatus('Error: ' + escHtml(err.message));
+      if (err.reply !== undefined) {
+        results.innerHTML = `<details class="clause-card"><summary>What the AI sent (end of reply)</summary><pre class="clause-text" style="white-space:pre-wrap">${escHtml(err.reply || '(empty reply)')}</pre></details>`;
+      }
     }
   }
 
@@ -268,7 +271,11 @@
       body: JSON.stringify({ text, documentName }),
     });
     const data = await res.json();
-    if (data.error) throw new Error(data.error);
+    if (data.error) {
+      const err = new Error(data.error);
+      err.reply = data.reply;
+      throw err;
+    }
     return data;
   }
 

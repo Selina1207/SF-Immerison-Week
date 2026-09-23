@@ -139,7 +139,7 @@ function parseClauses(raw, finishReason) {
       finishReason === 'length'
         ? 'The AI ran out of room before finishing. Try a shorter PDF.'
         : 'The AI did not return a readable answer. Please try again.';
-    return { error };
+    return { error, reply: raw.slice(-1500) };
   }
 
   const isPlaceholder = (s) => /^\s*\[.*\]\s*$/.test(s);

@@ -5,5 +5,6 @@ compatibility_date = "2024-09-23"
 # Set your secret with: wrangler secret put NVIDIA_API_KEY
 # Then deploy with: wrangler deploy
 
-[site]
-bucket = "./frontend"
+[assets]
+directory = "./frontend"
+binding = "ASSETS"

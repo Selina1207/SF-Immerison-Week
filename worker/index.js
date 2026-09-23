@@ -64,7 +64,7 @@ ${text.slice(0, 12000)}`;
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'meta/llama-3.3-70b-instruct',
+      model: 'deepseek-ai/deepseek-v4.1-flash',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 2048,
       temperature: 0.1,

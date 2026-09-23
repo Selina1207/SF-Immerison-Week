@@ -31,31 +31,44 @@ async function streamAnalysis(text, documentName, env) {
 - financial assignments or guarantees that take away patient protections
 
 Reply with ONLY a JSON array, no other text. Each element is an object with these keys:
-"quote": the clause copied word-for-word from the document
+"quote": the key sentence copied word-for-word from the document, at most 40 words
 "right": short name of the right being waived or limited
-"explanation": one or two plain-English sentences on what the patient gives up
+"explanation": one plain-English sentence on what the patient gives up
 "risk": "high", "medium", or "low"
 
 Every quote must be real text from the document. If nothing qualifies, reply with [].
 /no_think`;
 
-  const upstream = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${env.NVIDIA_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: 'nvidia/nemotron-3.5-lightning-30b-a3b',
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: `Document:\n\n${text}` },
-      ],
-      max_tokens: 4096,
-      temperature: 0.1,
-      stream: true,
-    }),
-  });
+  const request = {
+    model: 'nvidia/nemotron-3.5-lightning-30b-a3b',
+    messages: [
+      { role: 'system', content: system },
+      { role: 'user', content: `Document:\n\n${text}` },
+    ],
+    max_tokens: 4096,
+    temperature: 0.1,
+    stream: true,
+    chat_template_kwargs: { enable_thinking: false },
+  };
+
+  const callNvidia = (body) =>
+    fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.NVIDIA_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+  const startedAt = Date.now();
+  let upstream = await callNvidia(request);
+  // Not every NVIDIA model accepts chat_template_kwargs; retry once without it.
+  if (upstream.status === 400 || upstream.status === 422) {
+    console.error('NVIDIA rejected chat_template_kwargs, retrying without it', await upstream.text());
+    const { chat_template_kwargs, ...plain } = request;
+    upstream = await callNvidia(plain);
+  }
 
   if (!upstream.ok) {
     const err = await upstream.text();
@@ -95,6 +108,11 @@ Every quote must be real text from the document. If nothing qualifies, reply wit
         }
       }
 
+      console.log('NVIDIA reply finished', {
+        seconds: (Date.now() - startedAt) / 1000,
+        characters: fullText.length,
+        finishReason,
+      });
       const result = parseClauses(fullText, finishReason);
       if (result.clauses) {
         result.saved = await saveAnalysis(env, documentName, text, fullText, result.clauses);
@@ -121,7 +139,7 @@ function parseClauses(raw, finishReason) {
       finishReason === 'length'
         ? 'The AI ran out of room before finishing. Try a shorter PDF.'
         : 'The AI did not return a readable answer. Please try again.';
-    return { error };
+    return { error, reply: raw.slice(-1500) };
   }
 
   const isPlaceholder = (s) => /^\s*\[.*\]\s*$/.test(s);

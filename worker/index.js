@@ -1,24 +1,35 @@
-export default {
-  async fetch(request, env) {
-    if (request.method === 'OPTIONS') {
-      return corsResponse();
-    }
+import { getAssetFromKV } from '@cloudflare/kv-asset-handler';
+import manifestJSON from '__STATIC_CONTENT_MANIFEST';
 
-    if (request.method !== 'POST') {
-      return new Response('Method not allowed', { status: 405 });
+const assetManifest = JSON.parse(manifestJSON);
+
+export default {
+  async fetch(request, env, ctx) {
+    const url = new URL(request.url);
+
+    if (url.pathname === '/api/analyze') {
+      if (request.method === 'OPTIONS') return corsResponse();
+      if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
+
+      try {
+        const { text } = await request.json();
+        if (!text || text.trim().length === 0) {
+          return jsonResponse({ error: 'No text provided' }, 400);
+        }
+        const analysis = await analyzeDocument(text, env.NVIDIA_API_KEY);
+        return jsonResponse({ analysis });
+      } catch (err) {
+        return jsonResponse({ error: err.message }, 500);
+      }
     }
 
     try {
-      const { text } = await request.json();
-
-      if (!text || text.trim().length === 0) {
-        return jsonResponse({ error: 'No text provided' }, 400);
-      }
-
-      const analysis = await analyzeDocument(text, env.NVIDIA_API_KEY);
-      return jsonResponse({ analysis });
-    } catch (err) {
-      return jsonResponse({ error: err.message }, 500);
+      return await getAssetFromKV(
+        { request, waitUntil: ctx.waitUntil.bind(ctx) },
+        { ASSET_NAMESPACE: env.__STATIC_CONTENT, ASSET_MANIFEST: assetManifest }
+      );
+    } catch {
+      return new Response('Not Found', { status: 404 });
     }
   },
 };

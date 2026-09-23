@@ -16,8 +16,7 @@ export default {
         if (!text || text.trim().length === 0) {
           return jsonResponse({ error: 'No text provided' }, 400);
         }
-        const analysis = await analyzeDocument(text, env.NVIDIA_API_KEY);
-        return jsonResponse({ analysis });
+        return await streamAnalysis(text, env.NVIDIA_API_KEY);
       } catch (err) {
         return jsonResponse({ error: err.message }, 500);
       }
@@ -34,7 +33,7 @@ export default {
   },
 };
 
-async function analyzeDocument(text, apiKey) {
+async function streamAnalysis(text, apiKey) {
   const prompt = `You are a legal analyst helping hospital patient advocates identify clauses in hospital admission documents that waive or limit patient rights.
 
 Analyze the following hospital admission document and identify ALL clauses that waive or limit patient rights, including:
@@ -57,10 +56,7 @@ If no rights-waiver clauses are found, say: "No rights-waiver clauses identified
 Document text:
 ${text.slice(0, 6000)}`;
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 28000);
-
-  const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
+  const upstream = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
@@ -71,19 +67,58 @@ ${text.slice(0, 6000)}`;
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1024,
       temperature: 0.1,
+      stream: true,
     }),
-    signal: controller.signal,
   });
 
-  clearTimeout(timeout);
-
-  if (!response.ok) {
-    const err = await response.text();
-    throw new Error(`NVIDIA API error ${response.status}: ${err}`);
+  if (!upstream.ok) {
+    const err = await upstream.text();
+    throw new Error(`NVIDIA API error ${upstream.status}: ${err}`);
   }
 
-  const data = await response.json();
-  return data.choices[0].message.content;
+  const { readable, writable } = new TransformStream();
+  const writer = writable.getWriter();
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+
+  (async () => {
+    const reader = upstream.body.getReader();
+    let buffer = '';
+    let fullText = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop();
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          const data = line.slice(6).trim();
+          if (data === '[DONE]') continue;
+          try {
+            const json = JSON.parse(data);
+            const delta = json.choices?.[0]?.delta?.content;
+            if (delta) fullText += delta;
+          } catch {}
+        }
+      }
+
+      await writer.write(encoder.encode(JSON.stringify({ analysis: fullText })));
+    } finally {
+      await writer.close();
+    }
+  })();
+
+  return new Response(readable, {
+    headers: {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*',
+    },
+  });
 }
 
 function jsonResponse(body, status = 200) {

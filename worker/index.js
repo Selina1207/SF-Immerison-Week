@@ -58,7 +58,7 @@ Document text:
 ${text.slice(0, 6000)}`;
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
+  const timeout = setTimeout(() => controller.abort(), 28000);
 
   const response = await fetch('https://integrate.api.nvidia.com/v1/chat/completions', {
     method: 'POST',
@@ -67,7 +67,7 @@ ${text.slice(0, 6000)}`;
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      model: 'deepseek-ai/deepseek-v4.1-flash',
+      model: 'nvidia/nemotron-3.5-lightning-30b-a3b',
       messages: [{ role: 'user', content: prompt }],
       max_tokens: 1024,
       temperature: 0.1,

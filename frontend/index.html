@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Patient Rights Analyzer</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #f5f5f5;
+      color: #1a1a1a;
+      min-height: 100vh;
+    }
+
+    header {
+      background: #1a3a5c;
+      color: white;
+      padding: 20px 32px;
+    }
+
+    header h1 { font-size: 1.4rem; font-weight: 600; }
+    header p { font-size: 0.85rem; opacity: 0.75; margin-top: 4px; }
+
+    main {
+      max-width: 860px;
+      margin: 40px auto;
+      padding: 0 24px;
+    }
+
+    .upload-box {
+      border: 2px dashed #b0bec5;
+      border-radius: 12px;
+      padding: 48px;
+      text-align: center;
+      background: white;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+    }
+
+    .upload-box:hover, .upload-box.drag-over {
+      border-color: #1a3a5c;
+      background: #f0f4f8;
+    }
+
+    .upload-box input { display: none; }
+
+    .upload-icon { font-size: 2.5rem; margin-bottom: 12px; }
+
+    .upload-box h2 { font-size: 1.1rem; color: #1a3a5c; margin-bottom: 8px; }
+    .upload-box p { font-size: 0.85rem; color: #666; }
+
+    .btn {
+      display: inline-block;
+      margin-top: 16px;
+      padding: 10px 24px;
+      background: #1a3a5c;
+      color: white;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .btn:hover { background: #14304d; }
+
+    #status {
+      margin-top: 24px;
+      text-align: center;
+      font-size: 0.9rem;
+      color: #555;
+      min-height: 24px;
+    }
+
+    .spinner {
+      display: inline-block;
+      width: 16px;
+      height: 16px;
+      border: 2px solid #ccc;
+      border-top-color: #1a3a5c;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      vertical-align: middle;
+      margin-right: 8px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #results { margin-top: 32px; }
+
+    .results-header {
+      font-size: 1rem;
+      font-weight: 600;
+      color: #1a3a5c;
+      margin-bottom: 16px;
+    }
+
+    .clause-card {
+      background: white;
+      border-radius: 10px;
+      padding: 20px 24px;
+      margin-bottom: 16px;
+      border-left: 4px solid #ccc;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    }
+
+    .clause-card.high { border-left-color: #d32f2f; }
+    .clause-card.medium { border-left-color: #f57c00; }
+    .clause-card.low { border-left-color: #388e3c; }
+
+    .risk-badge {
+      display: inline-block;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 3px 8px;
+      border-radius: 4px;
+      margin-bottom: 10px;
+    }
+
+    .risk-badge.high { background: #fdecea; color: #d32f2f; }
+    .risk-badge.medium { background: #fff3e0; color: #f57c00; }
+    .risk-badge.low { background: #e8f5e9; color: #388e3c; }
+
+    .clause-right {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: #1a1a1a;
+      margin-bottom: 8px;
+    }
+
+    .clause-text {
+      font-size: 0.82rem;
+      color: #555;
+      font-style: italic;
+      background: #f9f9f9;
+      padding: 8px 12px;
+      border-radius: 6px;
+      margin-bottom: 10px;
+      line-height: 1.5;
+    }
+
+    .clause-plain {
+      font-size: 0.88rem;
+      color: #333;
+      line-height: 1.6;
+    }
+
+    .no-clauses {
+      background: #e8f5e9;
+      border-radius: 10px;
+      padding: 24px;
+      text-align: center;
+      color: #388e3c;
+      font-size: 0.95rem;
+    }
+
+    .disclaimer {
+      margin-top: 32px;
+      padding: 16px;
+      background: #fff8e1;
+      border-radius: 8px;
+      font-size: 0.8rem;
+      color: #5d4037;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Patient Rights Analyzer</h1>
+  <p>Upload a hospital admission document to surface clauses that waive patient rights</p>
+</header>
+
+<main>
+  <div class="upload-box" id="dropZone">
+    <input type="file" id="fileInput" accept=".pdf" />
+    <div class="upload-icon">📄</div>
+    <h2>Drop a hospital admission PDF here</h2>
+    <p>or click to select a file</p>
+    <button class="btn" onclick="document.getElementById('fileInput').click()">Choose PDF</button>
+  </div>
+
+  <div id="status"></div>
+  <div id="results"></div>
+
+  <div class="disclaimer">
+    <strong>For trained professionals only.</strong> This tool surfaces potential rights-waiver clauses for review. Output is AI-generated and may miss clauses or flag non-issues. Always apply your own professional judgment before advising patients.
+  </div>
+</main>
+
+<script>
+  pdfjsLib.GlobalWorkerOptions.workerSrc =
+    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+  const WORKER_URL = '/api/analyze';
+
+  const dropZone = document.getElementById('dropZone');
+  const fileInput = document.getElementById('fileInput');
+  const status = document.getElementById('status');
+  const results = document.getElementById('results');
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file && file.type === 'application/pdf') handleFile(file);
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) handleFile(fileInput.files[0]);
+  });
+
+  async function handleFile(file) {
+    results.innerHTML = '';
+    setStatus('<span class="spinner"></span>Extracting text from PDF…');
+
+    try {
+      const text = await extractText(file);
+      if (!text.trim()) {
+        setStatus('Could not extract text from this PDF. It may be scanned/image-based.');
+        return;
+      }
+
+      setStatus('<span class="spinner"></span>Analyzing for rights-waiver clauses…');
+      const analysis = await analyze(text);
+      renderResults(analysis);
+      setStatus('');
+    } catch (err) {
+      setStatus('Error: ' + err.message);
+    }
+  }
+
+  async function extractText(file) {
+    const buffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+    let text = '';
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      text += content.items.map(item => item.str).join(' ') + '\n';
+    }
+    return text;
+  }
+
+  async function analyze(text) {
+    const res = await fetch(WORKER_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+    if (data.error) throw new Error(data.error);
+    return data.analysis;
+  }
+
+  function renderResults(raw) {
+    const blocks = raw.split('---').map(b => b.trim()).filter(Boolean);
+    const clauses = blocks.map(parseClause).filter(Boolean);
+
+    if (clauses.length === 0) {
+      results.innerHTML = '<div class="no-clauses">✓ No rights-waiver clauses identified in this document.</div>';
+      return;
+    }
+
+    const header = `<div class="results-header">${clauses.length} clause${clauses.length > 1 ? 's' : ''} found</div>`;
+    const cards = clauses.map(renderCard).join('');
+    results.innerHTML = header + cards;
+  }
+
+  function parseClause(block) {
+    const get = (label) => {
+      const re = new RegExp(`${label}:\\s*(.+?)(?=\\n[A-Z ]+:|$)`, 'si');
+      const m = block.match(re);
+      return m ? m[1].trim() : '';
+    };
+    const clause = get('CLAUSE');
+    const right = get('RIGHT AFFECTED');
+    const plain = get('PLAIN ENGLISH');
+    const risk = get('RISK LEVEL');
+    if (!right && !plain) return null;
+    return { clause, right, plain, risk: risk.toLowerCase() };
+  }
+
+  function renderCard({ clause, right, plain, risk }) {
+    const level = ['high', 'medium', 'low'].includes(risk) ? risk : 'medium';
+    return `
+      <div class="clause-card ${level}">
+        <span class="risk-badge ${level}">${level} risk</span>
+        <div class="clause-right">${escHtml(right)}</div>
+        ${clause ? `<div class="clause-text">"${escHtml(clause)}"</div>` : ''}
+        <div class="clause-plain">${escHtml(plain)}</div>
+      </div>`;
+  }
+
+  function escHtml(str) {
+    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function setStatus(html) { status.innerHTML = html; }
+</script>
+
+</body>
+</html>

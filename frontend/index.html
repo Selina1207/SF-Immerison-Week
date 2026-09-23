@@ -222,6 +222,7 @@
     results.innerHTML = '';
     setStatus('<span class="spinner"></span>Extracting text from PDF…');
 
+    let timer;
     try {
       const text = await extractText(file);
       if (!text.trim()) {
@@ -229,11 +230,21 @@
         return;
       }
 
-      setStatus('<span class="spinner"></span>Analyzing for rights-waiver clauses…');
+      const startedAt = Date.now();
+      const showProgress = () => {
+        const seconds = Math.round((Date.now() - startedAt) / 1000);
+        setStatus(`<span class="spinner"></span>Analyzing for rights-waiver clauses… ${seconds}s`);
+      };
+      showProgress();
+      timer = setInterval(showProgress, 1000);
+
       const { clauses, saved } = await analyze(text, file.name);
+      clearInterval(timer);
+      const seconds = Math.round((Date.now() - startedAt) / 1000);
       renderResults(clauses);
-      setStatus(saved ? 'Saved to the database.' : '');
+      setStatus(`Done in ${seconds}s.${saved ? ' Saved to the database.' : ''}`);
     } catch (err) {
+      clearInterval(timer);
       setStatus('Error: ' + err.message);
     }
   }

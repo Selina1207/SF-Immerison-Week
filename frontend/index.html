@@ -117,6 +117,14 @@
       margin-top: 14px; padding: 10px 12px; border-radius: 8px;
       background: #fff8e6; color: #5d4a1f; font-size: 0.85rem;
     }
+    .notice + .notice { margin-top: 8px; }
+    .notes-list { padding-left: 18px; color: var(--ink); }
+    .notes-list li + li { margin-top: 4px; }
+    .unverified {
+      display: flex; gap: 8px; align-items: flex-start;
+      margin-bottom: 10px; padding: 8px 10px; border-radius: 8px;
+      background: #fdf0ef; color: #6b2323; font-size: 0.82rem;
+    }
 
     .section-title {
       font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
@@ -227,7 +235,7 @@
       <button class="btn btn-primary" type="button" id="chooseBtn">Choose PDF</button>
     </div>
     <div class="upload-notes">
-      <span>Text-based PDFs only (not scans)</span>
+      <span>Text-based PDFs up to 25 MB (not scans)</span>
       <span>The first ~6,000 characters are analyzed</span>
       <span>Use sample forms, not real patient documents</span>
     </div>
@@ -266,6 +274,13 @@
         </div>
       </div>
       <p class="notice" id="truncNotice" hidden></p>
+      <p class="notice" id="scopeNotice" hidden></p>
+      <p class="notice" id="languageNotice" hidden></p>
+    </section>
+
+    <section class="card" id="notesCard" hidden>
+      <h2 class="section-title">Reviewer notes from the AI</h2>
+      <ul class="notes-list" id="notesList"></ul>
     </section>
 
     <section class="card" id="summaryCard" hidden>
@@ -295,6 +310,7 @@
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
   const ANALYZED_CHARS = 6000;
+  const MAX_FILE_MB = 25;
   const RISKS = [
     { key: 'high', label: 'High risk' },
     { key: 'medium', label: 'Medium risk' },
@@ -333,6 +349,10 @@
       showError('Please choose a PDF file.');
       return;
     }
+    if (file.size > MAX_FILE_MB * 1024 * 1024) {
+      showError(`This file is ${(file.size / 1024 / 1024).toFixed(0)} MB. The limit is ${MAX_FILE_MB} MB. Try a shorter document or just the admission pages.`);
+      return;
+    }
 
     show('progressCard');
     setStep('read');
@@ -343,7 +363,7 @@
     timer = setInterval(tick, 1000);
 
     try {
-      const { text, pages } = await extractText(file);
+      const { text, pages, pagesRead } = await extractText(file);
       if (!text.trim()) {
         throw new Error('No text could be read from this PDF. It may be a scanned image.');
       }
@@ -356,7 +376,8 @@
       renderResults({
         fileName: file.name,
         pages,
-        totalChars: text.length,
+        pagesRead,
+        truncated: text.length > ANALYZED_CHARS || pagesRead < pages,
         seconds: Math.round((Date.now() - startedAt) / 1000),
         ...data,
       });
@@ -366,21 +387,30 @@
     }
   }
 
+  // Stops once there is more text than gets analyzed, so huge PDFs don't have to be read in full.
   async function extractText(file) {
-    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    let pdf;
+    try {
+      pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
+    } catch (err) {
+      if (err.name === 'PasswordException') throw new Error('This PDF is password-protected. Remove the password and try again.');
+      throw new Error("This file isn't a readable PDF. It may be damaged, cut off, or a different kind of file renamed to .pdf.");
+    }
     let text = '';
-    for (let i = 1; i <= pdf.numPages; i++) {
-      const content = await (await pdf.getPage(i)).getTextContent();
+    let pagesRead = 0;
+    while (pagesRead < pdf.numPages && text.length <= ANALYZED_CHARS) {
+      pagesRead++;
+      const content = await (await pdf.getPage(pagesRead)).getTextContent();
       text += content.items.map((item) => item.str).join(' ') + '\n';
     }
-    return { text, pages: pdf.numPages };
+    return { text, pages: pdf.numPages, pagesRead };
   }
 
   async function analyze(text, documentName) {
     const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, documentName }),
+      body: JSON.stringify({ text: text.slice(0, ANALYZED_CHARS), documentName }),
     });
     let data;
     try {
@@ -405,14 +435,16 @@
     $('docName').textContent = r.fileName;
     $('docMeta').textContent = `${r.pages} page${r.pages === 1 ? '' : 's'} · ${state.clauses.length} clause${state.clauses.length === 1 ? '' : 's'} flagged`;
 
-    const trunc = $('truncNotice');
-    if (r.totalChars > ANALYZED_CHARS) {
-      const pct = Math.round((ANALYZED_CHARS / r.totalChars) * 100);
-      trunc.textContent = `Only the first ${ANALYZED_CHARS.toLocaleString()} of ${r.totalChars.toLocaleString()} characters (about ${pct}% of this document) were analyzed. Clauses later in the document are not included.`;
-      trunc.hidden = false;
-    } else {
-      trunc.hidden = true;
-    }
+    setNotice('truncNotice', r.truncated &&
+      `Only the first ${ANALYZED_CHARS.toLocaleString()} characters were analyzed${r.pages > 1 ? ` (roughly pages 1–${r.pagesRead} of ${r.pages})` : ''}. Clauses later in the document are not included.`);
+    setNotice('scopeNotice', r.inScope === false &&
+      "This doesn't look like a hospital admission or consent document, so these results may not be meaningful.");
+    setNotice('languageNotice', r.language && !/english/i.test(r.language) &&
+      `This document appears to be in ${r.language}. The tool is tested on English documents only; quotes are kept in the original language.`);
+
+    const notes = r.notes || [];
+    $('notesList').innerHTML = notes.map((n) => `<li>${esc(n)}</li>`).join('');
+    $('notesCard').hidden = notes.length === 0;
 
     $('summaryText').textContent = r.summary || '';
     $('summaryCard').hidden = !r.summary;
@@ -466,6 +498,7 @@
             <button class="btn btn-ghost btn-small" type="button" data-copy="${i}">Copy</button>
           </div>
           <h3>${esc(c.right)}</h3>
+          ${c.verified === false ? `<p class="unverified"><span aria-hidden="true">⚠</span><span>This quote was not found in the document. The AI may have paraphrased or made it up, so check the original before relying on it.</span></p>` : ''}
           ${c.quote ? `<p class="quote">“${esc(c.quote)}”</p>` : ''}
           <p class="meaning"><strong>What this means:</strong> ${esc(c.explanation)}</p>
         </article>`;
@@ -477,7 +510,8 @@
 
   function clauseText(c) {
     const label = (RISKS.find((r) => r.key === c.risk) || RISKS[1]).label;
-    return `[${label}] ${c.right}\n${c.quote ? `"${c.quote}"\n` : ''}What this means: ${c.explanation}`;
+    const check = c.verified === false ? ' (quote not found in the document; check the original)' : '';
+    return `[${label}] ${c.right}\n${c.quote ? `"${c.quote}"${check}\n` : ''}What this means: ${c.explanation}`;
   }
 
   function reportText() {
@@ -485,7 +519,8 @@
     const parts = [`Patient Rights Analyzer report: ${r.fileName}`];
     if (r.summary) parts.push(`Summary:\n${r.summary}`);
     parts.push(state.clauses.length ? state.clauses.map(clauseText).join('\n\n') : 'No rights-waiver clauses found in the analyzed text.');
-    if (r.totalChars > ANALYZED_CHARS) parts.push(`Note: only the first ${ANALYZED_CHARS.toLocaleString()} characters were analyzed.`);
+    ['truncNotice', 'scopeNotice', 'languageNotice'].forEach((id) => { if (!$(id).hidden) parts.push(`Note: ${$(id).textContent}`); });
+    if (r.notes && r.notes.length) parts.push(`Reviewer notes from the AI:\n${r.notes.map((n) => `- ${n}`).join('\n')}`);
     parts.push('AI-generated screening aid for trained professionals. Not legal advice.');
     return parts.join('\n\n');
   }
@@ -499,6 +534,11 @@
       button.textContent = 'Copy failed';
     }
     setTimeout(() => { button.textContent = original; }, 1500);
+  }
+
+  function setNotice(id, message) {
+    $(id).textContent = message || '';
+    $(id).hidden = !message;
   }
 
   function setStep(current) {

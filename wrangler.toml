@@ -16,3 +16,9 @@ binding = "AI"
 [assets]
 directory = "./frontend"
 binding = "ASSETS"
+
+# Per-visitor cap on analyses so one person can't burn through the AI credits.
+[[ratelimits]]
+name = "RATE_LIMITER"
+namespace_id = "1001"
+simple = { limit = 10, period = 60 }

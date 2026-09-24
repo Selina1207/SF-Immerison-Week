@@ -34,6 +34,23 @@ export default {
       }
     }
 
+    if (url.pathname === '/api/history' || url.pathname.startsWith('/api/history/')) {
+      if (!supabaseConfigured(env)) return jsonResponse({ error: 'History is not set up on this site.' }, 503);
+      try {
+        if (url.pathname === '/api/history') {
+          return request.method === 'POST' ? await listHistory(request, env) : new Response('Method not allowed', { status: 405 });
+        }
+        const id = url.pathname.slice('/api/history/'.length);
+        if (!UUID.test(id)) return jsonResponse({ error: 'Not found.' }, 404);
+        if (request.method === 'GET') return await getHistoryItem(id, env);
+        if (request.method === 'DELETE') return await deleteHistoryItem(id, env);
+        return new Response('Method not allowed', { status: 405 });
+      } catch (err) {
+        console.error('History request failed', err);
+        return jsonResponse({ error: 'History request failed.' }, 500);
+      }
+    }
+
     return env.ASSETS.fetch(request);
   },
 };
@@ -79,7 +96,9 @@ function streamAnalysis(text, documentName, env) {
       const { result, raw } = await runAnalysis(text, env);
       if (result.clauses) {
         result.clauses = result.clauses.map((c) => ({ ...c, verified: quoteInDocument(c.quote, text) }));
-        result.saved = await saveAnalysis(env, documentName, text, raw, result.clauses);
+        const analysisId = await saveAnalysis(env, documentName, text, raw, result.clauses);
+        result.saved = Boolean(analysisId);
+        result.analysisId = analysisId;
       }
       await writer.write(encoder.encode(JSON.stringify(result)));
     } catch (err) {
@@ -283,52 +302,136 @@ function normalizeRisk(value) {
   return ['high', 'medium', 'low'].includes(risk) ? risk : 'medium';
 }
 
-async function saveAnalysis(env, documentName, text, aiResponse, clauses) {
-  if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return false;
+function supabaseConfigured(env) {
+  return Boolean(env.SUPABASE_URL && env.SUPABASE_SERVICE_KEY);
+}
 
-  const base = `${env.SUPABASE_URL.replace(/\/+$/, '')}/rest/v1`;
-  const headers = { apikey: env.SUPABASE_SERVICE_KEY, 'Content-Type': 'application/json' };
+function supabase(env, path, init = {}) {
+  const headers = { apikey: env.SUPABASE_SERVICE_KEY, 'Content-Type': 'application/json', ...init.headers };
   // Legacy service_role keys are JWTs and go in Authorization too; new sb_secret_ keys must not.
   if (env.SUPABASE_SERVICE_KEY.startsWith('eyJ')) {
     headers.Authorization = `Bearer ${env.SUPABASE_SERVICE_KEY}`;
   }
+  return fetch(`${env.SUPABASE_URL.replace(/\/+$/, '')}/rest/v1/${path}`, { ...init, headers });
+}
+
+// Returns the new analysis id, or null if it couldn't be saved.
+async function saveAnalysis(env, documentName, text, aiResponse, clauses) {
+  if (!supabaseConfigured(env)) return null;
 
   try {
-    const analysisRes = await fetch(`${base}/analyses`, {
+    const analysisRes = await supabase(env, 'analyses', {
       method: 'POST',
-      headers: { ...headers, Prefer: 'return=representation' },
+      headers: { Prefer: 'return=representation' },
       body: JSON.stringify({ document_name: documentName, raw_text: text, ai_response: aiResponse }),
     });
     if (!analysisRes.ok) {
       console.error('Supabase analyses insert failed', analysisRes.status, await analysisRes.text());
-      return false;
+      return null;
     }
     const [analysis] = await analysisRes.json();
 
-    if (clauses.length === 0) return true;
-
-    const clausesRes = await fetch(`${base}/clauses`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(
-        clauses.map((c) => ({
-          analysis_id: analysis.id,
-          right_affected: c.right,
-          clause_text: c.quote || null,
-          plain_english: c.explanation,
-          risk_level: c.risk,
-        }))
-      ),
-    });
-    if (!clausesRes.ok) {
-      console.error('Supabase clauses insert failed', clausesRes.status, await clausesRes.text());
-      return false;
+    if (clauses.length > 0) {
+      const clausesRes = await supabase(env, 'clauses', {
+        method: 'POST',
+        body: JSON.stringify(
+          clauses.map((c) => ({
+            analysis_id: analysis.id,
+            right_affected: c.right,
+            clause_text: c.quote || null,
+            plain_english: c.explanation,
+            risk_level: c.risk,
+          }))
+        ),
+      });
+      if (!clausesRes.ok) {
+        console.error('Supabase clauses insert failed', clausesRes.status, await clausesRes.text());
+        await supabase(env, `analyses?id=eq.${analysis.id}`, { method: 'DELETE' });
+        return null;
+      }
     }
-    return true;
+    return analysis.id;
   } catch (err) {
     console.error('Supabase save failed', err);
-    return false;
+    return null;
   }
+}
+
+// History has no login: the browser keeps the ids of its own analyses, and an unguessable id is what grants access.
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const MAX_HISTORY = 50;
+
+async function listHistory(request, env) {
+  let ids;
+  try {
+    ({ ids } = JSON.parse(await request.text()));
+  } catch {
+    return jsonResponse({ error: 'Request body must be JSON.' }, 400);
+  }
+  if (!Array.isArray(ids)) return jsonResponse({ error: 'ids must be an array.' }, 400);
+  const valid = ids.filter((id) => typeof id === 'string' && UUID.test(id)).slice(0, MAX_HISTORY);
+  if (valid.length === 0) return jsonResponse({ items: [] });
+
+  const res = await supabase(env, `analyses?id=in.(${valid.join(',')})&select=id,created_at,document_name,ai_response,clauses(risk_level)&order=created_at.desc`);
+  if (!res.ok) {
+    console.error('Supabase history list failed', res.status, await res.text());
+    return jsonResponse({ error: 'Could not load history.' }, 502);
+  }
+  const rows = await res.json();
+  return jsonResponse({
+    items: rows.map((row) => {
+      const counts = { high: 0, medium: 0, low: 0 };
+      for (const c of row.clauses || []) if (c.risk_level in counts) counts[c.risk_level]++;
+      return {
+        id: row.id,
+        createdAt: row.created_at,
+        documentName: row.document_name,
+        summary: parseClauses(row.ai_response || '', null).summary || '',
+        counts,
+      };
+    }),
+  });
+}
+
+async function getHistoryItem(id, env) {
+  const res = await supabase(env, `analyses?id=eq.${id}&select=id,created_at,document_name,raw_text,ai_response,clauses(right_affected,clause_text,plain_english,risk_level,created_at)`);
+  if (!res.ok) {
+    console.error('Supabase history item failed', res.status, await res.text());
+    return jsonResponse({ error: 'Could not load this analysis.' }, 502);
+  }
+  const [row] = await res.json();
+  if (!row) return jsonResponse({ error: 'This analysis no longer exists.' }, 404);
+
+  const parsed = parseClauses(row.ai_response || '', null);
+  const clauses = (row.clauses || [])
+    .sort((a, b) => a.created_at.localeCompare(b.created_at))
+    .map((c) => ({
+      quote: c.clause_text || '',
+      right: c.right_affected,
+      explanation: c.plain_english,
+      risk: normalizeRisk(c.risk_level),
+      verified: quoteInDocument(c.clause_text || '', row.raw_text || ''),
+    }));
+  return jsonResponse({
+    id: row.id,
+    createdAt: row.created_at,
+    documentName: row.document_name,
+    text: row.raw_text,
+    summary: parsed.summary || '',
+    inScope: parsed.inScope ?? true,
+    language: parsed.language || '',
+    notes: parsed.notes || [],
+    clauses,
+  });
+}
+
+async function deleteHistoryItem(id, env) {
+  const res = await supabase(env, `analyses?id=eq.${id}`, { method: 'DELETE' });
+  if (!res.ok) {
+    console.error('Supabase history delete failed', res.status, await res.text());
+    return jsonResponse({ error: 'Could not delete this analysis.' }, 502);
+  }
+  return jsonResponse({ deleted: true });
 }
 
 function jsonResponse(body, status = 200) {
@@ -345,7 +448,7 @@ function corsResponse() {
   return new Response(null, {
     headers: {
       'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
       'Access-Control-Allow-Headers': 'Content-Type',
     },
   });

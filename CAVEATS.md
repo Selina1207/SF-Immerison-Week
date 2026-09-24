@@ -8,7 +8,8 @@
 | Summary | AI-written from the analyzed text only. It can leave out or misstate details; check it against the document. |
 | Quotes | Checked against the document text. A quote that isn't found gets a warning, but a found quote can still be summarized wrongly. |
 | Risk levels | The model's own judgment. There is no written rubric behind High / Medium / Low. |
-| Saving | Each analysis and its clauses are saved to Supabase. There is no screen to view past analyses yet. |
+| Saving and History | Each analysis is saved to Supabase and listed under History in the browser that ran it. The list lives in that browser, so another device or cleared browser data won't show it. The original PDF is not stored, only the analyzed text and results. |
+| History access | There's no login. Each analysis is protected only by its long random id, which the browser keeps. Anyone who gets hold of an id can open or delete that analysis. |
 | Login | None. Anyone with the URL can use it, and all results go into one shared database. |
 | Privacy | Analyzed document text is stored. Do not upload real patient documents; use blank or sample forms. |
 | Speed | Depends on NVIDIA's free servers. The page counts seconds; if NVIDIA hasn't finished in 5 minutes (or errors sooner), Cloudflare's own AI answers instead. |

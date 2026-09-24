@@ -5,6 +5,7 @@
 | PDF text extraction | Real, in the browser. Text-based PDFs only; scanned or photographed pages return nothing (no OCR). |
 | Document length | Only the first ~6,000 characters (about 2–3 pages) are analyzed. Clauses later in a long packet are missed. |
 | Clause detection | Real AI call (NVIDIA `nemotron-3.5-lightning-30b-a3b`). It can miss clauses or flag harmless ones. |
+| Summary | AI-written from the analyzed text only. It can leave out or misstate details; check it against the document. |
 | Quotes | The AI is told to quote word for word, but quotes are not checked against the document. |
 | Risk levels | The model's own judgment. There is no written rubric behind High / Medium / Low. |
 | Saving | Each analysis and its clauses are saved to Supabase. There is no screen to view past analyses yet. |

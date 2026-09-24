@@ -29,13 +29,15 @@ const SYSTEM_PROMPT = `You review hospital admission documents for patient advoc
 - waivers of statutory patient rights
 - financial assignments or guarantees that take away patient protections
 
-Reply with ONLY a JSON array, no other text. Each element is an object with these keys:
-"quote": the key sentence copied word-for-word from the document, at most 40 words
-"right": short name of the right being waived or limited
-"explanation": one plain-English sentence on what the patient gives up
-"risk": "high", "medium", or "low"
+Reply with ONLY a JSON object, no other text, with exactly these keys:
+"summary": 3 to 4 plain-English sentences a patient could understand: what this document is, what the patient is agreeing to, and any costs or responsibilities it puts on them
+"clauses": an array where each element is an object with these keys:
+  "quote": the key sentence copied word-for-word from the document, at most 40 words
+  "right": short name of the right being waived or limited
+  "explanation": one plain-English sentence on what the patient gives up
+  "risk": "high", "medium", or "low"
 
-Every quote must be real text from the document. If nothing qualifies, reply with [].`;
+Every quote must be real text from the document. If no clause qualifies, use an empty array for "clauses".`;
 
 const NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
 const NVIDIA_TIME_LIMIT_MS = 300000;
@@ -182,8 +184,8 @@ async function askNvidia(document, env) {
 }
 
 function parseClauses(raw, finishReason) {
-  const items = extractAnswerArray(raw);
-  if (!items) {
+  const answer = extractAnswer(raw);
+  if (!answer) {
     console.error('Unreadable AI reply', { finishReason, length: raw.length, tail: raw.slice(-1500) });
     const error =
       finishReason === 'length'
@@ -193,7 +195,7 @@ function parseClauses(raw, finishReason) {
   }
 
   const isPlaceholder = (s) => /^\s*\[.*\]\s*$/.test(s);
-  const clauses = items
+  const clauses = answer.items
     .map((c) => ({
       quote: String(c?.quote ?? '').trim(),
       right: String(c?.right ?? '').trim(),
@@ -202,20 +204,31 @@ function parseClauses(raw, finishReason) {
     }))
     .filter((c) => c.right && c.explanation && !isPlaceholder(c.right) && !isPlaceholder(c.explanation));
 
-  return { clauses };
+  const summary = typeof answer.summary === 'string' && !isPlaceholder(answer.summary) ? answer.summary.trim() : '';
+  return { summary, clauses };
 }
 
-// The answer is the JSON array at the end of the reply; reasoning before it may contain stray brackets.
-function extractAnswerArray(raw) {
+// The answer is the JSON at the end of the reply; reasoning before it may contain stray brackets.
+// Prefer the {summary, clauses} object, but accept a bare clauses array if the model skips the summary.
+function extractAnswer(raw) {
   const thinkEnd = raw.lastIndexOf('</think>');
   const text = thinkEnd === -1 ? raw : raw.slice(thinkEnd + '</think>'.length);
-  const end = text.lastIndexOf(']');
-  if (end === -1) return null;
 
-  for (let start = text.indexOf('['); start !== -1 && start < end; start = text.indexOf('[', start + 1)) {
+  const object = lastJson(text, '{', '}', (v) => v && typeof v === 'object' && Array.isArray(v.clauses));
+  if (object) return { summary: object.summary, items: object.clauses };
+
+  const array = lastJson(text, '[', ']', Array.isArray);
+  return array ? { summary: '', items: array } : null;
+}
+
+// Largest valid JSON value that ends at the last closing character.
+function lastJson(text, open, close, accept) {
+  const end = text.lastIndexOf(close);
+  if (end === -1) return null;
+  for (let start = text.indexOf(open); start !== -1 && start < end; start = text.indexOf(open, start + 1)) {
     try {
       const value = JSON.parse(text.slice(start, end + 1));
-      if (Array.isArray(value)) return value;
+      if (accept(value)) return value;
     } catch {}
   }
   return null;

@@ -6,271 +6,388 @@
   <title>Patient Rights Analyzer</title>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
   <style>
+    :root {
+      --page: #f9f9f7;
+      --surface: #ffffff;
+      --ink: #0b0b0b;
+      --ink-2: #52514e;
+      --muted: #898781;
+      --hairline: #e1e0d9;
+      --ring: rgba(11, 11, 11, 0.10);
+      --brand: #1a3a5c;
+      --brand-dark: #122a44;
+      --brand-wash: #eef3f8;
+      --high: #d03b3b;
+      --medium: #ec835a;
+      --low: #fab219;
+      --radius: 12px;
+    }
+
     * { box-sizing: border-box; margin: 0; padding: 0; }
 
     body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      background: #f5f5f5;
-      color: #1a1a1a;
+      font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+      background: var(--page);
+      color: var(--ink);
+      line-height: 1.5;
       min-height: 100vh;
     }
 
+    [hidden] { display: none !important; }
+
     header {
-      background: #1a3a5c;
-      color: white;
-      padding: 20px 32px;
+      background: linear-gradient(135deg, var(--brand) 0%, #24507a 100%);
+      color: #fff;
+      padding: 28px 24px 32px;
+    }
+    .header-inner { max-width: 880px; margin: 0 auto; padding: 0 20px; }
+    .brand-row { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+    header h1 { font-size: 1.5rem; font-weight: 650; letter-spacing: -0.01em; }
+    .pill {
+      font-size: 0.72rem; font-weight: 600; letter-spacing: 0.02em;
+      background: rgba(255, 255, 255, 0.16); border: 1px solid rgba(255, 255, 255, 0.28);
+      padding: 3px 10px; border-radius: 999px;
+    }
+    header p { margin-top: 6px; opacity: 0.85; max-width: 620px; }
+
+    main { max-width: 880px; margin: -16px auto 48px; padding: 0 20px; }
+
+    .card {
+      background: var(--surface);
+      border-radius: var(--radius);
+      box-shadow: 0 0 0 1px var(--ring), 0 1px 3px rgba(11, 11, 11, 0.04);
+      padding: 24px;
+      margin-bottom: 16px;
     }
 
-    header h1 { font-size: 1.4rem; font-weight: 600; }
-    header p { font-size: 0.85rem; opacity: 0.75; margin-top: 4px; }
-
-    main {
-      max-width: 860px;
-      margin: 40px auto;
-      padding: 0 24px;
-    }
-
-    .upload-box {
-      border: 2px dashed #b0bec5;
-      border-radius: 12px;
-      padding: 48px;
+    /* Upload */
+    .dropzone {
+      border: 2px dashed #c3c2b7;
+      border-radius: 10px;
+      padding: 36px 20px;
       text-align: center;
-      background: white;
       cursor: pointer;
-      transition: border-color 0.2s, background 0.2s;
+      transition: border-color 0.15s, background 0.15s;
     }
-
-    .upload-box:hover, .upload-box.drag-over {
-      border-color: #1a3a5c;
-      background: #f0f4f8;
+    .dropzone:hover, .dropzone.drag-over, .dropzone:focus-visible {
+      border-color: var(--brand); background: var(--brand-wash); outline: none;
     }
-
-    .upload-box input { display: none; }
-
-    .upload-icon { font-size: 2.5rem; margin-bottom: 12px; }
-
-    .upload-box h2 { font-size: 1.1rem; color: #1a3a5c; margin-bottom: 8px; }
-    .upload-box p { font-size: 0.85rem; color: #666; }
+    .dropzone svg { width: 40px; height: 40px; color: var(--brand); margin-bottom: 10px; }
+    .dropzone h2 { font-size: 1.1rem; font-weight: 600; }
+    .dropzone p { color: var(--ink-2); font-size: 0.9rem; margin-top: 2px; }
+    .upload-notes {
+      display: flex; flex-wrap: wrap; gap: 6px 18px; justify-content: center;
+      margin-top: 14px; font-size: 0.8rem; color: var(--muted);
+    }
 
     .btn {
-      display: inline-block;
-      margin-top: 16px;
-      padding: 10px 24px;
-      background: #1a3a5c;
-      color: white;
-      border: none;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      cursor: pointer;
-      transition: background 0.2s;
+      display: inline-flex; align-items: center; gap: 6px;
+      font: inherit; font-size: 0.88rem; font-weight: 600;
+      padding: 9px 16px; border-radius: 8px; cursor: pointer;
+      border: 1px solid transparent; transition: background 0.15s, border-color 0.15s;
     }
+    .btn-primary { background: var(--brand); color: #fff; margin-top: 16px; }
+    .btn-primary:hover { background: var(--brand-dark); }
+    .btn-ghost { background: var(--surface); color: var(--ink); border-color: var(--hairline); }
+    .btn-ghost:hover { background: var(--page); border-color: #c3c2b7; }
+    .btn-small { font-size: 0.78rem; padding: 5px 10px; }
 
-    .btn:hover { background: #14304d; }
-
-    #status {
-      margin-top: 24px;
-      text-align: center;
-      font-size: 0.9rem;
-      color: #555;
-      min-height: 24px;
+    /* Progress */
+    .steps { list-style: none; display: grid; gap: 12px; }
+    .step { display: flex; align-items: center; gap: 12px; color: var(--muted); }
+    .step .dot {
+      width: 22px; height: 22px; border-radius: 50%; flex: none;
+      border: 2px solid var(--hairline); display: grid; place-items: center;
+      font-size: 0.75rem; font-weight: 700;
     }
-
-    .spinner {
-      display: inline-block;
-      width: 16px;
-      height: 16px;
-      border: 2px solid #ccc;
-      border-top-color: #1a3a5c;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      vertical-align: middle;
-      margin-right: 8px;
-    }
-
+    .step.active { color: var(--ink); font-weight: 600; }
+    .step.active .dot { border-color: var(--brand); border-top-color: transparent; animation: spin 0.8s linear infinite; }
+    .step.done { color: var(--ink-2); }
+    .step.done .dot { border-color: var(--brand); background: var(--brand); color: #fff; }
+    .step.done .dot::after { content: "✓"; }
+    .elapsed { margin-top: 14px; font-size: 0.85rem; color: var(--ink-2); }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    #results { margin-top: 32px; }
-
-    .results-header {
-      font-size: 1rem;
-      font-weight: 600;
-      color: #1a3a5c;
-      margin-bottom: 16px;
+    /* Results header */
+    .doc-head { display: flex; justify-content: space-between; gap: 16px; align-items: flex-start; flex-wrap: wrap; }
+    .doc-name { font-size: 1.15rem; font-weight: 650; word-break: break-word; }
+    .doc-meta { color: var(--ink-2); font-size: 0.85rem; margin-top: 2px; }
+    .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+    .notice {
+      margin-top: 14px; padding: 10px 12px; border-radius: 8px;
+      background: #fff8e6; color: #5d4a1f; font-size: 0.85rem;
     }
 
-    .clause-card {
-      background: white;
-      border-radius: 10px;
-      padding: 20px 24px;
-      margin-bottom: 16px;
-      border-left: 4px solid #ccc;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    .section-title {
+      font-size: 0.78rem; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--ink-2); margin-bottom: 8px;
+    }
+    .summary-text { font-size: 1rem; color: var(--ink); }
+
+    /* Risk overview (stat tiles, also filters) */
+    .tiles { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; }
+    .tile {
+      font: inherit; text-align: left; cursor: pointer;
+      background: var(--surface); border: 1px solid var(--hairline); border-radius: 10px;
+      padding: 14px 16px; transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    .tile:hover { border-color: #c3c2b7; }
+    .tile[aria-pressed="true"] { border-color: var(--ink); box-shadow: inset 0 0 0 1px var(--ink); }
+    .tile-label { display: flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: 0.85rem; }
+    .tile-value { font-size: 2rem; font-weight: 650; color: var(--ink); line-height: 1.15; margin-top: 4px; }
+    .filter-note { margin-top: 10px; font-size: 0.82rem; color: var(--ink-2); }
+    .link-btn { font: inherit; background: none; border: none; color: var(--brand); cursor: pointer; text-decoration: underline; padding: 0; }
+
+    .icon { display: inline-block; width: 12px; height: 12px; flex: none; }
+    .icon.high { background: var(--high); clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+    .icon.medium { background: var(--medium); transform: rotate(45deg) scale(0.8); }
+    .icon.low { background: var(--low); border-radius: 50%; }
+
+    /* Clause cards */
+    .clause {
+      background: var(--surface); border-radius: var(--radius);
+      box-shadow: 0 0 0 1px var(--ring);
+      border-left: 4px solid var(--hairline);
+      padding: 18px 20px; margin-bottom: 12px;
+    }
+    .clause.high { border-left-color: var(--high); }
+    .clause.medium { border-left-color: var(--medium); }
+    .clause.low { border-left-color: var(--low); }
+    .clause-top { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 8px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.03em; text-transform: uppercase; color: var(--ink-2);
+    }
+    .clause h3 { font-size: 1.02rem; font-weight: 650; margin-bottom: 8px; }
+    .quote {
+      font-size: 0.88rem; color: var(--ink-2); font-style: italic;
+      border-left: 2px solid var(--hairline); padding: 2px 0 2px 12px; margin-bottom: 10px;
+    }
+    .meaning { font-size: 0.92rem; }
+    .meaning strong { font-weight: 600; }
+
+    .empty {
+      text-align: center; padding: 28px; color: var(--ink-2);
+    }
+    .empty strong { display: block; color: var(--ink); font-size: 1.05rem; margin-bottom: 4px; }
+
+    .run-meta { font-size: 0.8rem; color: var(--muted); margin: 4px 2px 16px; }
+
+    .error-title { font-weight: 650; color: var(--high); margin-bottom: 6px; }
+    details { margin-top: 12px; font-size: 0.85rem; }
+    details summary { cursor: pointer; color: var(--ink-2); }
+    details pre { white-space: pre-wrap; background: var(--page); padding: 10px; border-radius: 8px; margin-top: 8px; font-size: 0.8rem; }
+
+    footer {
+      max-width: 880px; margin: 0 auto 40px; padding: 0 20px;
+      font-size: 0.8rem; color: var(--ink-2);
+    }
+    footer .card { background: #fffdf5; box-shadow: 0 0 0 1px #efe6c8; }
+
+    @media (max-width: 560px) {
+      header { padding: 22px 18px 28px; }
+      .card { padding: 18px; }
+      .tiles { gap: 8px; }
+      .tile { padding: 10px 12px; }
+      .tile-value { font-size: 1.6rem; }
+      .tile-label { font-size: 0.78rem; }
     }
 
-    .clause-card.high { border-left-color: #d32f2f; }
-    .clause-card.medium { border-left-color: #f57c00; }
-    .clause-card.low { border-left-color: #388e3c; }
-
-    .risk-badge {
-      display: inline-block;
-      font-size: 0.7rem;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
-      padding: 3px 8px;
-      border-radius: 4px;
-      margin-bottom: 10px;
-    }
-
-    .risk-badge.high { background: #fdecea; color: #d32f2f; }
-    .risk-badge.medium { background: #fff3e0; color: #f57c00; }
-    .risk-badge.low { background: #e8f5e9; color: #388e3c; }
-
-    .clause-right {
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: #1a1a1a;
-      margin-bottom: 8px;
-    }
-
-    .clause-text {
-      font-size: 0.82rem;
-      color: #555;
-      font-style: italic;
-      background: #f9f9f9;
-      padding: 8px 12px;
-      border-radius: 6px;
-      margin-bottom: 10px;
-      line-height: 1.5;
-    }
-
-    .clause-plain {
-      font-size: 0.88rem;
-      color: #333;
-      line-height: 1.6;
-    }
-
-    .no-clauses {
-      background: #e8f5e9;
-      border-radius: 10px;
-      padding: 24px;
-      text-align: center;
-      color: #388e3c;
-      font-size: 0.95rem;
-    }
-
-    .disclaimer {
-      margin-top: 32px;
-      padding: 16px;
-      background: #fff8e1;
-      border-radius: 8px;
-      font-size: 0.8rem;
-      color: #5d4037;
-      line-height: 1.5;
+    @media print {
+      body { background: #fff; }
+      header { background: none; color: var(--ink); padding: 0 0 12px; }
+      #uploadCard, #progressCard, .actions, .clause-top button, .filter-note { display: none !important; }
+      .clause { break-inside: avoid; box-shadow: 0 0 0 1px #ccc; }
+      .clause[hidden] { display: block !important; }
+      main { margin-top: 0; }
     }
   </style>
 </head>
 <body>
 
 <header>
-  <h1>Patient Rights Analyzer</h1>
-  <p>Upload a hospital admission document to surface clauses that waive patient rights</p>
+  <div class="header-inner">
+    <div class="brand-row">
+      <h1>Patient Rights Analyzer</h1>
+      <span class="pill">For patient advocates &amp; social workers</span>
+    </div>
+    <p>Upload a hospital admission document. Get a plain-English summary and every clause that waives a patient's rights, ranked by risk.</p>
+  </div>
 </header>
 
 <main>
-  <div class="upload-box" id="dropZone">
-    <input type="file" id="fileInput" accept=".pdf" />
-    <div class="upload-icon">📄</div>
-    <h2>Drop a hospital admission PDF here</h2>
-    <p>or click to select a file</p>
-    <button class="btn" onclick="document.getElementById('fileInput').click()">Choose PDF</button>
-  </div>
+  <section class="card" id="uploadCard">
+    <div class="dropzone" id="dropZone" role="button" tabindex="0" aria-label="Upload a hospital admission PDF">
+      <input type="file" id="fileInput" accept="application/pdf,.pdf" hidden />
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z" /><path d="M14 3v5h5" /><path d="M12 12v6" /><path d="m9 15 3-3 3 3" />
+      </svg>
+      <h2>Drop a hospital admission PDF here</h2>
+      <p>or choose a file from your computer</p>
+      <button class="btn btn-primary" type="button" id="chooseBtn">Choose PDF</button>
+    </div>
+    <div class="upload-notes">
+      <span>Text-based PDFs only (not scans)</span>
+      <span>The first ~6,000 characters are analyzed</span>
+      <span>Use sample forms, not real patient documents</span>
+    </div>
+  </section>
 
-  <div id="status"></div>
-  <div id="results"></div>
+  <section class="card" id="progressCard" hidden aria-live="polite">
+    <ol class="steps">
+      <li class="step" data-step="read"><span class="dot"></span>Reading the PDF</li>
+      <li class="step" data-step="analyze"><span class="dot"></span>Summarizing and finding rights-waiver clauses</li>
+      <li class="step" data-step="done"><span class="dot"></span>Preparing results</li>
+    </ol>
+    <p class="elapsed" id="elapsed"></p>
+  </section>
 
-  <div class="disclaimer">
-    <strong>For trained professionals only.</strong> This tool surfaces potential rights-waiver clauses for review. Output is AI-generated and may miss clauses or flag non-issues. Always apply your own professional judgment before advising patients.
+  <section class="card" id="errorCard" hidden role="alert">
+    <p class="error-title">Something went wrong</p>
+    <p id="errorText"></p>
+    <details id="errorReply" hidden>
+      <summary>What the AI sent (end of reply)</summary>
+      <pre id="errorReplyText"></pre>
+    </details>
+    <button class="btn btn-ghost" type="button" id="errorReset" style="margin-top:14px">Try another PDF</button>
+  </section>
+
+  <div id="results" hidden>
+    <section class="card">
+      <div class="doc-head">
+        <div>
+          <div class="doc-name" id="docName"></div>
+          <div class="doc-meta" id="docMeta"></div>
+        </div>
+        <div class="actions">
+          <button class="btn btn-ghost" type="button" id="copyBtn">Copy report</button>
+          <button class="btn btn-ghost" type="button" id="printBtn">Print</button>
+          <button class="btn btn-ghost" type="button" id="resetBtn">Analyze another</button>
+        </div>
+      </div>
+      <p class="notice" id="truncNotice" hidden></p>
+    </section>
+
+    <section class="card" id="summaryCard" hidden>
+      <h2 class="section-title">Summary</h2>
+      <p class="summary-text" id="summaryText"></p>
+    </section>
+
+    <section class="card">
+      <h2 class="section-title">Risk overview</h2>
+      <div class="tiles" id="tiles"></div>
+      <p class="filter-note" id="filterNote"></p>
+    </section>
+
+    <div id="clauseList"></div>
+    <p class="run-meta" id="runMeta"></p>
   </div>
 </main>
+
+<footer>
+  <div class="card">
+    <strong>For trained professionals only.</strong> This tool points you to clauses worth reading closely. It is AI-generated, can miss clauses or flag harmless ones, and is not legal advice. Always apply your own judgment before advising a patient.
+  </div>
+</footer>
 
 <script>
   pdfjsLib.GlobalWorkerOptions.workerSrc =
     'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-  const WORKER_URL = '/api/analyze';
+  const ANALYZED_CHARS = 6000;
+  const RISKS = [
+    { key: 'high', label: 'High risk' },
+    { key: 'medium', label: 'Medium risk' },
+    { key: 'low', label: 'Low risk' },
+  ];
 
-  const dropZone = document.getElementById('dropZone');
-  const fileInput = document.getElementById('fileInput');
-  const status = document.getElementById('status');
-  const results = document.getElementById('results');
+  const $ = (id) => document.getElementById(id);
+  const state = { clauses: [], filter: null, report: null };
+  let timer;
 
-  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  const dropZone = $('dropZone');
+  const fileInput = $('fileInput');
+
+  $('chooseBtn').addEventListener('click', (e) => { e.stopPropagation(); fileInput.click(); });
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); fileInput.click(); }
+  });
+  dropZone.addEventListener('dragover', (e) => { e.preventDefault(); dropZone.classList.add('drag-over'); });
   dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
-  dropZone.addEventListener('drop', e => {
+  dropZone.addEventListener('drop', (e) => {
     e.preventDefault();
     dropZone.classList.remove('drag-over');
     const file = e.dataTransfer.files[0];
-    if (file && file.type === 'application/pdf') handleFile(file);
+    if (file) handleFile(file);
   });
+  fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
 
-  fileInput.addEventListener('change', () => {
-    if (fileInput.files[0]) handleFile(fileInput.files[0]);
-  });
+  $('resetBtn').addEventListener('click', reset);
+  $('errorReset').addEventListener('click', reset);
+  $('printBtn').addEventListener('click', () => window.print());
+  $('copyBtn').addEventListener('click', () => copyText(reportText(), $('copyBtn')));
 
   async function handleFile(file) {
-    results.innerHTML = '';
-    setStatus('<span class="spinner"></span>Extracting text from PDF…');
+    if (file.type !== 'application/pdf' && !file.name.toLowerCase().endsWith('.pdf')) {
+      showError('Please choose a PDF file.');
+      return;
+    }
 
-    let timer;
+    show('progressCard');
+    setStep('read');
+    const startedAt = Date.now();
+    const tick = () => { $('elapsed').textContent = `${Math.round((Date.now() - startedAt) / 1000)}s elapsed`; };
+    tick();
+    clearInterval(timer);
+    timer = setInterval(tick, 1000);
+
     try {
-      const text = await extractText(file);
+      const { text, pages } = await extractText(file);
       if (!text.trim()) {
-        setStatus('Could not extract text from this PDF. It may be scanned/image-based.');
-        return;
+        throw new Error('No text could be read from this PDF. It may be a scanned image.');
       }
 
-      const startedAt = Date.now();
-      const showProgress = () => {
-        const seconds = Math.round((Date.now() - startedAt) / 1000);
-        setStatus(`<span class="spinner"></span>Analyzing for rights-waiver clauses… ${seconds}s`);
-      };
-      showProgress();
-      timer = setInterval(showProgress, 1000);
+      setStep('analyze');
+      const data = await analyze(text, file.name);
 
-      const { clauses, saved } = await analyze(text, file.name);
+      setStep('done');
       clearInterval(timer);
-      const seconds = Math.round((Date.now() - startedAt) / 1000);
-      renderResults(clauses);
-      setStatus(`Done in ${seconds}s.${saved ? ' Saved to the database.' : ''}`);
+      renderResults({
+        fileName: file.name,
+        pages,
+        totalChars: text.length,
+        seconds: Math.round((Date.now() - startedAt) / 1000),
+        ...data,
+      });
     } catch (err) {
       clearInterval(timer);
-      setStatus('Error: ' + escHtml(err.message));
-      if (err.reply !== undefined) {
-        results.innerHTML = `<details class="clause-card"><summary>What the AI sent (end of reply)</summary><pre class="clause-text" style="white-space:pre-wrap">${escHtml(err.reply || '(empty reply)')}</pre></details>`;
-      }
+      showError(err.message, err.reply);
     }
   }
 
   async function extractText(file) {
-    const buffer = await file.arrayBuffer();
-    const pdf = await pdfjsLib.getDocument({ data: buffer }).promise;
+    const pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
     let text = '';
     for (let i = 1; i <= pdf.numPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      text += content.items.map(item => item.str).join(' ') + '\n';
+      const content = await (await pdf.getPage(i)).getTextContent();
+      text += content.items.map((item) => item.str).join(' ') + '\n';
     }
-    return text;
+    return { text, pages: pdf.numPages };
   }
 
   async function analyze(text, documentName) {
-    const res = await fetch(WORKER_URL, {
+    const res = await fetch('/api/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, documentName }),
     });
-    const data = await res.json();
+    let data;
+    try {
+      data = await res.json();
+    } catch {
+      throw new Error(`The server returned an unexpected response (status ${res.status}). Please try again.`);
+    }
     if (data.error) {
       const err = new Error(data.error);
       err.reply = data.reply;
@@ -279,33 +396,143 @@
     return data;
   }
 
-  function renderResults(clauses) {
-    if (clauses.length === 0) {
-      results.innerHTML = '<div class="no-clauses">✓ No rights-waiver clauses identified in this document.</div>';
-      return;
+  function renderResults(r) {
+    const order = { high: 0, medium: 1, low: 2 };
+    state.clauses = [...(r.clauses || [])].sort((a, b) => order[a.risk] - order[b.risk]);
+    state.filter = null;
+    state.report = r;
+
+    $('docName').textContent = r.fileName;
+    $('docMeta').textContent = `${r.pages} page${r.pages === 1 ? '' : 's'} · ${state.clauses.length} clause${state.clauses.length === 1 ? '' : 's'} flagged`;
+
+    const trunc = $('truncNotice');
+    if (r.totalChars > ANALYZED_CHARS) {
+      const pct = Math.round((ANALYZED_CHARS / r.totalChars) * 100);
+      trunc.textContent = `Only the first ${ANALYZED_CHARS.toLocaleString()} of ${r.totalChars.toLocaleString()} characters (about ${pct}% of this document) were analyzed. Clauses later in the document are not included.`;
+      trunc.hidden = false;
+    } else {
+      trunc.hidden = true;
     }
 
-    const header = `<div class="results-header">${clauses.length} clause${clauses.length > 1 ? 's' : ''} found</div>`;
-    const cards = clauses.map(renderCard).join('');
-    results.innerHTML = header + cards;
+    $('summaryText').textContent = r.summary || '';
+    $('summaryCard').hidden = !r.summary;
+
+    const source = r.provider === 'cloudflare' ? 'Cloudflare AI (NVIDIA was too slow)' : 'NVIDIA';
+    $('runMeta').textContent = `Done in ${r.seconds}s · Answered by ${source}${r.saved ? ' · Saved to the database' : ''}`;
+
+    renderTiles();
+    renderClauses();
+    show('results');
   }
 
-  function renderCard({ quote, right, explanation, risk }) {
-    const level = ['high', 'medium', 'low'].includes(risk) ? risk : 'medium';
-    return `
-      <div class="clause-card ${level}">
-        <span class="risk-badge ${level}">${level} risk</span>
-        <div class="clause-right">${escHtml(right)}</div>
-        ${quote ? `<div class="clause-text">"${escHtml(quote)}"</div>` : ''}
-        <div class="clause-plain">${escHtml(explanation)}</div>
-      </div>`;
+  function renderTiles() {
+    const counts = Object.fromEntries(RISKS.map(({ key }) => [key, state.clauses.filter((c) => c.risk === key).length]));
+    $('tiles').innerHTML = RISKS.map(({ key, label }) => `
+      <button class="tile" type="button" data-risk="${key}" aria-pressed="${state.filter === key}">
+        <span class="tile-label"><span class="icon ${key}" aria-hidden="true"></span>${label}</span>
+        <span class="tile-value">${counts[key]}</span>
+      </button>`).join('');
+    $('tiles').querySelectorAll('.tile').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        state.filter = state.filter === btn.dataset.risk ? null : btn.dataset.risk;
+        renderTiles();
+        renderClauses();
+      });
+    });
+
+    const note = $('filterNote');
+    if (state.filter) {
+      const label = RISKS.find((r) => r.key === state.filter).label.toLowerCase();
+      note.innerHTML = `Showing ${label} clauses only. <button class="link-btn" type="button" id="clearFilter">Show all</button>`;
+      $('clearFilter').addEventListener('click', () => { state.filter = null; renderTiles(); renderClauses(); });
+    } else {
+      note.textContent = state.clauses.length ? 'Select a tile to show only that risk level.' : '';
+    }
   }
 
-  function escHtml(str) {
-    return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  function renderClauses() {
+    const list = $('clauseList');
+    if (state.clauses.length === 0) {
+      list.innerHTML = `<div class="card empty"><strong>No rights-waiver clauses found</strong>Nothing in the analyzed text appears to waive or limit patient rights. Read the full document to confirm.</div>`;
+      return;
+    }
+    list.innerHTML = state.clauses.map((c, i) => {
+      const risk = RISKS.find((r) => r.key === c.risk) || RISKS[1];
+      const hidden = state.filter && state.filter !== c.risk ? ' hidden' : '';
+      return `
+        <article class="clause ${risk.key}"${hidden}>
+          <div class="clause-top">
+            <span class="badge"><span class="icon ${risk.key}" aria-hidden="true"></span>${risk.label}</span>
+            <button class="btn btn-ghost btn-small" type="button" data-copy="${i}">Copy</button>
+          </div>
+          <h3>${esc(c.right)}</h3>
+          ${c.quote ? `<p class="quote">“${esc(c.quote)}”</p>` : ''}
+          <p class="meaning"><strong>What this means:</strong> ${esc(c.explanation)}</p>
+        </article>`;
+    }).join('');
+    list.querySelectorAll('[data-copy]').forEach((btn) => {
+      btn.addEventListener('click', () => copyText(clauseText(state.clauses[Number(btn.dataset.copy)]), btn));
+    });
   }
 
-  function setStatus(html) { status.innerHTML = html; }
+  function clauseText(c) {
+    const label = (RISKS.find((r) => r.key === c.risk) || RISKS[1]).label;
+    return `[${label}] ${c.right}\n${c.quote ? `"${c.quote}"\n` : ''}What this means: ${c.explanation}`;
+  }
+
+  function reportText() {
+    const r = state.report;
+    const parts = [`Patient Rights Analyzer report: ${r.fileName}`];
+    if (r.summary) parts.push(`Summary:\n${r.summary}`);
+    parts.push(state.clauses.length ? state.clauses.map(clauseText).join('\n\n') : 'No rights-waiver clauses found in the analyzed text.');
+    if (r.totalChars > ANALYZED_CHARS) parts.push(`Note: only the first ${ANALYZED_CHARS.toLocaleString()} characters were analyzed.`);
+    parts.push('AI-generated screening aid for trained professionals. Not legal advice.');
+    return parts.join('\n\n');
+  }
+
+  async function copyText(text, button) {
+    const original = button.textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = 'Copied';
+    } catch {
+      button.textContent = 'Copy failed';
+    }
+    setTimeout(() => { button.textContent = original; }, 1500);
+  }
+
+  function setStep(current) {
+    const names = ['read', 'analyze', 'done'];
+    const index = names.indexOf(current);
+    document.querySelectorAll('.step').forEach((el) => {
+      const i = names.indexOf(el.dataset.step);
+      el.classList.toggle('done', i < index);
+      el.classList.toggle('active', i === index);
+    });
+  }
+
+  function showError(message, reply) {
+    $('errorText').textContent = message;
+    const details = $('errorReply');
+    details.hidden = reply === undefined;
+    $('errorReplyText').textContent = reply || '(empty reply)';
+    show('errorCard');
+  }
+
+  function show(id) {
+    ['uploadCard', 'progressCard', 'errorCard', 'results'].forEach((section) => { $(section).hidden = section !== id; });
+  }
+
+  function reset() {
+    clearInterval(timer);
+    fileInput.value = '';
+    show('uploadCard');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
+
+  function esc(str) {
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
 </script>
 
 </body>

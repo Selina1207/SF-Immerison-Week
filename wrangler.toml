@@ -10,6 +10,9 @@ compatibility_date = "2024-09-23"
 [vars]
 SUPABASE_URL = "https://wljsozvipckmojqitunh.supabase.co"
 
+[ai]
+binding = "AI"
+
 [assets]
 directory = "./frontend"
 binding = "ASSETS"

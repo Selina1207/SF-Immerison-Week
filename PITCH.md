@@ -14,7 +14,7 @@ I drop in an admission PDF. [Drop the PDF.]
 
 The page reads the text right in the browser. The AI then looks for clauses that take away a patient's rights: arbitration, liability limits, broad consent to share records, and financial guarantees.
 
-In [__] seconds it found [__] clauses in a [__]-page document. [Point to the top card.]
+In [__] seconds it gives a plain-English summary of the whole document, and it found [__] clauses in a [__]-page document. [Point to the risk overview.]
 
 Each one shows the exact sentence from the document, the right it affects, a plain-English explanation, and a risk level, so the reader can go straight to the paragraph that matters.
 

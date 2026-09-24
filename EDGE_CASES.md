@@ -45,6 +45,7 @@ The **Should do** column was written before running anything.
 | S1 | `fixtures/at-scale/long-120-pages.pdf`, 120 pages of admission text | Finish quickly, analyze the first ~6,000 characters, and say clearly that the rest was not analyzed |
 | S2 | A PDF over 25 MB | Refuse before reading it, and name the size limit |
 | S3 | The same visitor sending more than 5 analyses in a minute | Refuse extra requests with a "slow down" message instead of spending AI credits |
+| S4 | The same PDF uploaded again (even with different capitalization or spacing) | Return the saved result with no AI call; the same for a document already refused as out of scope |
 
 ## Results
 
@@ -72,3 +73,21 @@ The **Should do** column was written before running anything.
 ## Red-team probe
 
 `node scripts/probe.mjs https://patient-rights-analyzer.selina1207.workers.dev` sends 15 attacks to the live site: prompt injections, fake JSON, a request to leak the prompt, keyword stuffing, out-of-scope documents, Spanish, gibberish, a document that says it has *no* arbitration, a repeat for consistency, and a rate-limit burst. It stops after 25 tries or 5 findings, ranks findings by severity, and writes `probe-results.md` with the input, output, and reason for each. The AI-backed tries use real credits.
+
+## Red-team log (Sep 24, local)
+
+The live site and NVIDIA can't be reached from the build environment, so this run attacked a local copy of the real Worker code. The AI's replies were scripted to imitate realistic model mistakes, which tests how the site handles what the model says. `scripts/probe.mjs` covers the real model. Stopping rule: 25 tries or 5 findings. Findings are ranked by severity (3 = harmful wrong answer, 1 = cosmetic).
+
+| Round | Sev | Input | Output | Why it is wrong | Fix |
+|---|---|---|---|---|---|
+| 1 | 3 | Model writes risk as `"High risk"` | Shown as **medium** | A high-risk waiver was downgraded | Risk words are matched (high, critical, severe, serious → high; low, minor → low) |
+| 1 | 3 | Model writes risk as `"Critical"` | Shown as **medium** | Same | Same |
+| 1 | 2 | Invented clause quoting only `"the patient"` | Marked verified | An 11-character quote proves nothing, so an invented clause looked real | Quotes under 25 characters (or with parts under 12) are marked "too short to check" |
+| 1 | 2 | Two real fragments joined with `...` | Marked verified | Stitched fragments can misstate a clause | Marked as "joins separate passages", telling the reader to read the full clause |
+| 1 | 1 | PDF text `arbi- tration` (split across a line) | "Quote not found" warning | A real quote got a false warning | Line-break hyphens are rejoined before matching |
+| 2 | 3 | Model writes `"in_scope": "false"` (as text) | Results shown | This defeated the out-of-scope block | `"false"` or `"no"` as text also count as out of scope |
+| 2 | 3 | The same PDF uploaded twice | 2 AI calls | Repeat uploads spent credits every time | Duplicate protection (S4), after running `supabase/migrations/0002_dedupe.sql` |
+| 2 | 2 | Model lists the same clause twice | Counted twice | Inflated the risk counts | Duplicate clauses are removed |
+| 2 | 1 | Summary returned as a list | Summary dropped | Lost the summary | Lists are joined into one paragraph |
+
+Round 3, after the fixes: 13 tries, 0 findings.

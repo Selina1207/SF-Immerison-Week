@@ -6,7 +6,8 @@
 | Document length | Only the first ~6,000 characters (about 2–3 pages) are analyzed. The page says which pages were covered, but clauses later in a long packet are missed (see EDGE_CASES.md S1). |
 | Clause detection | Real AI call: NVIDIA `nemotron-3.5-lightning-30b-a3b`, with Cloudflare `llama-3.3-70b-instruct-fp8-fast` as the backup. It can miss clauses or flag harmless ones. |
 | Summary | AI-written from the analyzed text only. It can leave out or misstate details; check it against the document. |
-| Quotes | Checked against the document text. A quote that isn't found gets a warning, but a found quote can still be summarized wrongly. |
+| Quotes | Checked against the document text. Quotes that aren't found, are too short to prove anything, or stitch separate passages together get a warning. A found quote can still be explained wrongly. |
+| Duplicate uploads | The same document text is sent to the AI once; later uploads reuse the saved result, including refusals. It matches exact text (ignoring case and spacing), so an edited copy is analyzed again. Two identical uploads at the same moment can both reach the AI. Deleting an analysis from History removes its saved result. Requires running `supabase/migrations/0002_dedupe.sql`. |
 | Risk levels | The model's own judgment. There is no written rubric behind High / Medium / Low. |
 | Saving and History | Each analysis is saved to Supabase and listed under History in the browser that ran it. The list lives in that browser, so another device or cleared browser data won't show it. The original PDF is not stored, only the analyzed text and results. |
 | History access | There's no login. Each analysis is protected only by its long random id, which the browser keeps. Anyone who gets hold of an id can open or delete that analysis. |

@@ -319,6 +319,7 @@
           <button class="btn btn-ghost" type="button" id="resetBtn">Analyze another</button>
         </div>
       </div>
+      <p class="notice" id="cachedNotice" hidden></p>
       <p class="notice" id="truncNotice" hidden></p>
       <p class="notice" id="scopeNotice" hidden></p>
       <p class="notice" id="languageNotice" hidden></p>
@@ -377,6 +378,12 @@
 
   const ANALYZED_CHARS = 6000;
   const MAX_FILE_MB = 25;
+  const QUOTE_WARNINGS = {
+    not_found: 'This quote was not found in the document. The AI may have paraphrased or made it up, so check the original before relying on it.',
+    too_short: 'This quote is too short to check against the document. Read the original before relying on it.',
+    joined: 'This quote joins separate passages of the document with "…". Read the full clause in the original.',
+  };
+  const quoteCheck = (c) => c.check || (c.verified === false ? 'not_found' : 'found');
   const RISKS = [
     { key: 'high', label: 'High risk' },
     { key: 'medium', label: 'Medium risk' },
@@ -521,6 +528,8 @@
       ? `Saved ${formatDate(r.savedAt)} · ${flagged}`
       : `${r.pages} page${r.pages === 1 ? '' : 's'} · ${flagged}`;
 
+    setNotice('cachedNotice', r.cached &&
+      'This exact document was analyzed before, so these are the saved results. No AI credits were used.');
     setNotice('truncNotice', r.truncated &&
       `Only the first ${ANALYZED_CHARS.toLocaleString()} characters were analyzed${r.pages > 1 ? ` (roughly pages 1–${r.pagesRead} of ${r.pages})` : ''}. Clauses later in the document are not included.`);
     $('analyzedText').textContent = r.analyzedText || '';
@@ -540,9 +549,10 @@
     if (r.savedAt) {
       $('runMeta').textContent = 'Opened from History.';
     } else {
-      const source = r.provider === 'cloudflare' ? 'Cloudflare AI (NVIDIA was too slow)' : 'NVIDIA';
+      const source = r.cached ? 'Reused saved results, no AI used'
+        : `Answered by ${r.provider === 'cloudflare' ? 'Cloudflare AI (NVIDIA was too slow)' : 'NVIDIA'}`;
       const saved = r.saved ? 'Saved to History' : "Not saved, so it won't appear in History";
-      $('runMeta').textContent = `Done in ${r.seconds}s · Answered by ${source} · ${saved}`;
+      $('runMeta').textContent = `Done in ${r.seconds}s · ${source} · ${saved}`;
     }
 
     renderTiles();
@@ -591,7 +601,7 @@
             <button class="btn btn-ghost btn-small" type="button" data-copy="${i}">Copy</button>
           </div>
           <h3>${esc(c.right)}</h3>
-          ${c.verified === false ? `<p class="unverified"><span aria-hidden="true">⚠</span><span>This quote was not found in the document. The AI may have paraphrased or made it up, so check the original before relying on it.</span></p>` : ''}
+          ${QUOTE_WARNINGS[quoteCheck(c)] ? `<p class="unverified"><span aria-hidden="true">⚠</span><span>${QUOTE_WARNINGS[quoteCheck(c)]}</span></p>` : ''}
           ${c.quote ? `<p class="quote">“${esc(c.quote)}”</p>` : ''}
           <p class="meaning"><strong>What this means:</strong> ${esc(c.explanation)}</p>
         </article>`;
@@ -603,7 +613,7 @@
 
   function clauseText(c) {
     const label = (RISKS.find((r) => r.key === c.risk) || RISKS[1]).label;
-    const check = c.verified === false ? ' (quote not found in the document; check the original)' : '';
+    const check = QUOTE_WARNINGS[quoteCheck(c)] ? ` (${QUOTE_WARNINGS[quoteCheck(c)]})` : '';
     return `[${label}] ${c.right}\n${c.quote ? `"${c.quote}"${check}\n` : ''}What this means: ${c.explanation}`;
   }
 

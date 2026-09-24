@@ -87,6 +87,8 @@ const ANALYZED_CHARS = 6000;
 // English and Spanish terms that hospital admission paperwork almost always uses.
 const MEDICAL_TERMS = /\b(patients?|hospitals?|admissions?|admit(?:ted)?|consent|treatments?|medical|medicine|physicians?|doctors?|nurs(?:e|es|ing)|clinics?|clinical|health|healthcare|surgery|surgical|diagnos\w*|medications?|emergency|discharge|insurance|medicare|medicaid|hipaa|paciente|hospitalaria|consentimiento|tratamiento|m[eé]dic[oa]s?|salud|enfermer[ií]a|cl[ií]nica|admisi[oó]n)\b/gi;
 const MIN_MEDICAL_TERMS = 2;
+const MIN_QUOTE_CHARS = 25;
+const MIN_QUOTE_PART_CHARS = 12;
 const MAX_BODY_CHARS = 100000;
 const NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
 const NVIDIA_TIME_LIMIT_MS = 300000;
@@ -100,15 +102,23 @@ function streamAnalysis(text, documentName, env) {
 
   (async () => {
     try {
+      const hash = await textHash(text);
+      const cached = await findCached(env, hash);
+      if (cached) {
+        await writer.write(encoder.encode(JSON.stringify(cached)));
+        return;
+      }
+
       const { result, raw } = await runAnalysis(text, env);
       if (result.clauses && result.inScope === false) {
         // Out-of-scope documents get no summary or clauses, so the site can't be used as a general summarizer.
+        await saveAnalysis(env, documentName, '', '', [], { hash, outOfScope: true });
         await writer.write(encoder.encode(JSON.stringify({ outOfScope: true, reason: 'ai', provider: result.provider })));
         return;
       }
       if (result.clauses) {
-        result.clauses = result.clauses.map((c) => ({ ...c, verified: quoteInDocument(c.quote, text) }));
-        const analysisId = await saveAnalysis(env, documentName, text, raw, result.clauses);
+        result.clauses = result.clauses.map((c) => withQuoteCheck(c, text));
+        const analysisId = await saveAnalysis(env, documentName, text, raw, result.clauses, { hash });
         result.saved = Boolean(analysisId);
         result.analysisId = analysisId;
       }
@@ -259,9 +269,11 @@ function parseClauses(raw, finishReason) {
       explanation: String(c?.explanation ?? '').trim(),
       risk: normalizeRisk(c?.risk),
     }))
-    .filter((c) => c.right && c.explanation && !isPlaceholder(c.right) && !isPlaceholder(c.explanation));
+    .filter((c) => c.right && c.explanation && !isPlaceholder(c.right) && !isPlaceholder(c.explanation))
+    .filter((c, i, all) => all.findIndex((o) => sameClause(o, c)) === i);
 
-  const summary = typeof answer.summary === 'string' && !isPlaceholder(answer.summary) ? answer.summary.trim() : '';
+  const summaryText = Array.isArray(answer.summary) ? answer.summary.filter((x) => typeof x === 'string').join(' ') : answer.summary;
+  const summary = typeof summaryText === 'string' && !isPlaceholder(summaryText) ? summaryText.trim() : '';
   const notes = (Array.isArray(answer.notes) ? answer.notes : [])
     .filter((n) => typeof n === 'string' && n.trim() && !isPlaceholder(n))
     .map((n) => n.trim())
@@ -269,7 +281,8 @@ function parseClauses(raw, finishReason) {
   return {
     summary,
     clauses,
-    inScope: answer.in_scope !== false,
+    // Models sometimes write "false" or "no" as text; any of those still means out of scope.
+    inScope: !(answer.in_scope === false || /^\s*(false|no)\s*$/i.test(String(answer.in_scope))),
     language: typeof answer.language === 'string' ? answer.language.trim().slice(0, 40) : '',
     notes,
   };
@@ -281,11 +294,20 @@ function looksMedical(text) {
 }
 
 // Loose match so small punctuation or spacing differences don't count as a made-up quote.
-function quoteInDocument(quote, documentText) {
-  const normalize = (s) => s.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+// check is "found", "joined" (real passages stitched with "..."), "too_short" to prove anything, or "not_found".
+// Hyphens at PDF line breaks ("arbi- tration") are rejoined on both sides.
+function checkQuote(quote, documentText) {
+  const normalize = (s) => s.replace(/\u00ad/g, '').replace(/(\p{L})-\s+(\p{L})/gu, '$1$2').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const haystack = normalize(documentText);
-  const parts = quote.split(/\.\.\.|…/).map(normalize).filter((p) => p.length >= 8);
-  return parts.length > 0 && parts.every((p) => haystack.includes(p));
+  const parts = quote.split(/\.\.\.|…/).map(normalize).filter(Boolean);
+  if (parts.join(' ').length < MIN_QUOTE_CHARS || parts.some((p) => p.length < MIN_QUOTE_PART_CHARS)) return 'too_short';
+  if (!parts.every((p) => haystack.includes(p))) return 'not_found';
+  return parts.length > 1 ? 'joined' : 'found';
+}
+
+function withQuoteCheck(clause, documentText) {
+  const check = checkQuote(clause.quote, documentText);
+  return { ...clause, check, verified: check === 'found' || check === 'joined' };
 }
 
 // The answer is the JSON at the end of the reply; reasoning before it may contain stray brackets.
@@ -314,9 +336,17 @@ function lastJson(text, open, close, accept) {
   return null;
 }
 
+// Models often write "High risk", "Critical", or "Moderate"; map those instead of downgrading them to medium.
+function sameClause(a, b) {
+  const key = (c) => `${c.right} ${c.quote}`.toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  return key(a) === key(b);
+}
+
 function normalizeRisk(value) {
-  const risk = String(value ?? '').trim().toLowerCase();
-  return ['high', 'medium', 'low'].includes(risk) ? risk : 'medium';
+  const risk = String(value ?? '').toLowerCase();
+  if (/high|critical|severe|serious/.test(risk)) return 'high';
+  if (/low|minor/.test(risk)) return 'low';
+  return 'medium';
 }
 
 function supabaseConfigured(env) {
@@ -333,15 +363,23 @@ function supabase(env, path, init = {}) {
 }
 
 // Returns the new analysis id, or null if it couldn't be saved.
-async function saveAnalysis(env, documentName, text, aiResponse, clauses) {
+async function saveAnalysis(env, documentName, text, aiResponse, clauses, { hash, outOfScope = false } = {}) {
   if (!supabaseConfigured(env)) return null;
 
   try {
-    const analysisRes = await supabase(env, 'analyses', {
+    const row = { document_name: documentName, raw_text: text, ai_response: aiResponse };
+    const insert = (body) => supabase(env, 'analyses', {
       method: 'POST',
       headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({ document_name: documentName, raw_text: text, ai_response: aiResponse }),
+      body: JSON.stringify(body),
     });
+    let analysisRes = await insert({ ...row, text_hash: hash, out_of_scope: outOfScope });
+    if (!analysisRes.ok && /text_hash|out_of_scope/.test(await analysisRes.clone().text())) {
+      // Migration 0002 hasn't been run yet: keep saving without duplicate protection.
+      console.error('Duplicate protection is off until supabase/migrations/0002_dedupe.sql is run');
+      if (outOfScope) return null;
+      analysisRes = await insert(row);
+    }
     if (!analysisRes.ok) {
       console.error('Supabase analyses insert failed', analysisRes.status, await analysisRes.text());
       return null;
@@ -411,25 +449,29 @@ async function listHistory(request, env) {
 }
 
 async function getHistoryItem(id, env) {
-  const res = await supabase(env, `analyses?id=eq.${id}&select=id,created_at,document_name,raw_text,ai_response,clauses(right_affected,clause_text,plain_english,risk_level,created_at)`);
+  const res = await supabase(env, `analyses?id=eq.${id}&select=${ANALYSIS_COLUMNS}`);
   if (!res.ok) {
     console.error('Supabase history item failed', res.status, await res.text());
     return jsonResponse({ error: 'Could not load this analysis.' }, 502);
   }
   const [row] = await res.json();
   if (!row) return jsonResponse({ error: 'This analysis no longer exists.' }, 404);
+  return jsonResponse(rowToAnalysis(row));
+}
 
+const ANALYSIS_COLUMNS = 'id,created_at,document_name,raw_text,ai_response,clauses(right_affected,clause_text,plain_english,risk_level,created_at)';
+
+function rowToAnalysis(row) {
   const parsed = parseClauses(row.ai_response || '', null);
   const clauses = (row.clauses || [])
     .sort((a, b) => a.created_at.localeCompare(b.created_at))
-    .map((c) => ({
+    .map((c) => withQuoteCheck({
       quote: c.clause_text || '',
       right: c.right_affected,
       explanation: c.plain_english,
       risk: normalizeRisk(c.risk_level),
-      verified: quoteInDocument(c.clause_text || '', row.raw_text || ''),
-    }));
-  return jsonResponse({
+    }, row.raw_text || ''));
+  return {
     id: row.id,
     createdAt: row.created_at,
     documentName: row.document_name,
@@ -439,7 +481,34 @@ async function getHistoryItem(id, env) {
     language: parsed.language || '',
     notes: parsed.notes || [],
     clauses,
-  });
+  };
+}
+
+// Same text (ignoring case and spacing) gives the same hash, so a re-upload of the same PDF matches.
+async function textHash(text) {
+  const normalized = text.toLowerCase().replace(/\s+/g, ' ').trim();
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(normalized));
+  return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// A previously analyzed copy of this exact text, returned in the same shape as a fresh analysis.
+async function findCached(env, hash) {
+  if (!supabaseConfigured(env)) return null;
+  try {
+    const res = await supabase(env, `analyses?text_hash=eq.${hash}&select=${ANALYSIS_COLUMNS},out_of_scope&order=created_at.desc&limit=1`);
+    if (!res.ok) {
+      console.error('Duplicate lookup failed (has 0002_dedupe.sql been run?)', res.status, await res.text());
+      return null;
+    }
+    const [row] = await res.json();
+    if (!row) return null;
+    if (row.out_of_scope) return { outOfScope: true, reason: 'ai', cached: true };
+    const { id, text, createdAt, documentName, ...analysis } = rowToAnalysis(row);
+    return { ...analysis, cached: true, provider: 'cache', saved: true, analysisId: id };
+  } catch (err) {
+    console.error('Duplicate lookup failed', err);
+    return null;
+  }
 }
 
 async function deleteHistoryItem(id, env) {

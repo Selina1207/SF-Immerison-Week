@@ -31,9 +31,12 @@ The **Should do** column was written before running anything.
 
 | # | Input | Should do |
 |---|---|---|
-| O1 | `fixtures/out-of-scope/apartment-lease.pdf`, a lease with an arbitration clause | Say it doesn't look like a hospital admission document, while still showing what it found |
-| O2 | `fixtures/out-of-scope/recipe.pdf`, a cookie recipe | Say it's not a hospital admission document and flag no clauses |
+| O1 | `fixtures/out-of-scope/apartment-lease.pdf`, a lease with an arbitration clause | Refuse: "This isn't a hospital admission document", with no summary or clauses, and without calling the AI (revised; see below) |
+| O2 | `fixtures/out-of-scope/recipe.pdf`, a cookie recipe | Same as O1 (revised) |
 | O3 | `fixtures/sample/no-waivers.pdf`, a hospital form with no waivers | Summarize it and say no rights-waiver clauses were found |
+| O4 | `fixtures/adversarial/keyword-stuffing.pdf`, an unrelated article padded with "patient hospital consent treatment…" | Refuse with no summary, so the site can't be used as a free summarizer |
+
+**Revised on Sep 24:** O1 and O2 used to say "warn but still show results". Showing a summary of any document turned the site into a free general summarizer, so out-of-scope documents are now refused with nothing returned.
 
 ## At scale
 
@@ -58,8 +61,9 @@ The **Should do** column was written before running anything.
 | A1 | No defense beyond the prompt's wording | Site handles it: the document is wrapped in `<document>` tags (with any tags inside it removed), the prompt says its contents are data and never instructions, and the AI can raise a reviewer note. Real-model check: probes `injection-*` |
 | A2 | Pass: the text is escaped and no script runs | Pass |
 | A3 | Fail: a made-up quote looked real | Pass: every quote is checked against the document text; ones that aren't found get a visible warning, including in copied reports |
-| O1 | Fail: no out-of-scope signal | Site handles it: the AI reports `in_scope`, and the page shows "This doesn't look like a hospital admission…". Real-model check: probe `lease` |
-| O2 | Fail: same | Same as O1. Real-model check: probe `recipe` |
+| O1 | Fail: no out-of-scope signal | Pass: refused before the AI runs, because the text has fewer than 2 medical or hospital terms. No credits spent and nothing saved |
+| O2 | Fail: same | Pass: same as O1 |
+| O4 | Fail: would be summarized | Site handles it: it gets past the word check, but when the AI marks it out of scope, the Worker returns only `outOfScope` (no summary, clauses, or notes, even through the API) and doesn't save it. Real-model check: probe `keyword-stuffing` |
 | O3 | Empty state already existed | Pass. Real-model check: probes `no-waivers` and `negated-waiver` |
 | S1 | Read all 120 pages and sent 56,546 characters to the server, which used 6,000 | Pass: stops reading once it has enough text (13 of 120 pages), sends 6,000 characters, and says which pages were analyzed. **Still misses the waiver on page 90**; that limit is in CAVEATS.md |
 | S2 | Fail: read a 26 MB file, then sent it | Pass: refused before reading, with the 25 MB limit named. The Worker also refuses request bodies over 100,000 characters (HTTP 413) |
@@ -67,4 +71,4 @@ The **Should do** column was written before running anything.
 
 ## Red-team probe
 
-`node scripts/probe.mjs https://patient-rights-analyzer.selina1207.workers.dev` sends 14 attacks to the live site: prompt injections, fake JSON, a request to leak the prompt, out-of-scope documents, Spanish, gibberish, a document that says it has *no* arbitration, a repeat for consistency, and a rate-limit burst. It stops after 25 tries or 5 findings, ranks findings by severity, and writes `probe-results.md` with the input, output, and reason for each. The AI-backed tries use real credits.
+`node scripts/probe.mjs https://patient-rights-analyzer.selina1207.workers.dev` sends 15 attacks to the live site: prompt injections, fake JSON, a request to leak the prompt, keyword stuffing, out-of-scope documents, Spanish, gibberish, a document that says it has *no* arbitration, a repeat for consistency, and a rate-limit burst. It stops after 25 tries or 5 findings, ranks findings by severity, and writes `probe-results.md` with the input, output, and reason for each. The AI-backed tries use real credits.

@@ -28,7 +28,11 @@ export default {
           return jsonResponse({ error: 'No text provided' }, 400);
         }
         const name = String(documentName || '').trim().slice(0, 200) || 'untitled.pdf';
-        return streamAnalysis(text.slice(0, ANALYZED_CHARS), name, env);
+        const analyzed = text.slice(0, ANALYZED_CHARS);
+        if (!looksMedical(analyzed)) {
+          return jsonResponse({ outOfScope: true, reason: 'no-medical-terms' });
+        }
+        return streamAnalysis(analyzed, name, env);
       } catch (err) {
         return jsonResponse({ error: err.message }, 500);
       }
@@ -80,6 +84,9 @@ Reply with ONLY a JSON object, no other text, with exactly these keys:
 Every quote must be real text from the document. If no clause qualifies, use an empty array for "clauses".`;
 
 const ANALYZED_CHARS = 6000;
+// English and Spanish terms that hospital admission paperwork almost always uses.
+const MEDICAL_TERMS = /\b(patients?|hospitals?|admissions?|admit(?:ted)?|consent|treatments?|medical|medicine|physicians?|doctors?|nurs(?:e|es|ing)|clinics?|clinical|health|healthcare|surgery|surgical|diagnos\w*|medications?|emergency|discharge|insurance|medicare|medicaid|hipaa|paciente|hospitalaria|consentimiento|tratamiento|m[eé]dic[oa]s?|salud|enfermer[ií]a|cl[ií]nica|admisi[oó]n)\b/gi;
+const MIN_MEDICAL_TERMS = 2;
 const MAX_BODY_CHARS = 100000;
 const NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
 const NVIDIA_TIME_LIMIT_MS = 300000;
@@ -94,6 +101,11 @@ function streamAnalysis(text, documentName, env) {
   (async () => {
     try {
       const { result, raw } = await runAnalysis(text, env);
+      if (result.clauses && result.inScope === false) {
+        // Out-of-scope documents get no summary or clauses, so the site can't be used as a general summarizer.
+        await writer.write(encoder.encode(JSON.stringify({ outOfScope: true, reason: 'ai', provider: result.provider })));
+        return;
+      }
       if (result.clauses) {
         result.clauses = result.clauses.map((c) => ({ ...c, verified: quoteInDocument(c.quote, text) }));
         const analysisId = await saveAnalysis(env, documentName, text, raw, result.clauses);
@@ -261,6 +273,11 @@ function parseClauses(raw, finishReason) {
     language: typeof answer.language === 'string' ? answer.language.trim().slice(0, 40) : '',
     notes,
   };
+}
+
+function looksMedical(text) {
+  const found = new Set((text.match(MEDICAL_TERMS) || []).map((t) => t.toLowerCase().replace(/s$/, '')));
+  return found.size >= MIN_MEDICAL_TERMS;
 }
 
 // Loose match so small punctuation or spacing differences don't count as a made-up quote.

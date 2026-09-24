@@ -85,9 +85,13 @@ Every quote must be real text from the document. If no clause qualifies, use an 
 
 const ANALYZED_CHARS = 6000;
 // English and Spanish terms that hospital admission paperwork almost always uses.
-const MEDICAL_TERMS = /\b(patients?|hospitals?|admissions?|admit(?:ted)?|consent|treatments?|medical|medicine|physicians?|doctors?|nurs(?:e|es|ing)|clinics?|clinical|health|healthcare|surgery|surgical|diagnos\w*|medications?|emergency|discharge|insurance|medicare|medicaid|hipaa|paciente|hospitalaria|consentimiento|tratamiento|m[eé]dic[oa]s?|salud|enfermer[ií]a|cl[ií]nica|admisi[oó]n)\b/gi;
+const MEDICAL_TERMS = /\b(patients?|hospitals?|admissions?|admit(?:ted)?|consent|treatments?|medical|medicine|physicians?|doctors?|nurs(?:e|es|ing)|clinics?|clinical|health|healthcare|surgery|surgical|diagnos\w*|medications?|emergency|discharge|insurance|medicare|medicaid|hipaa|guarantors?|inpatient|outpatient|paciente|hospitalaria|consentimiento|tratamiento|m[eé]dic[oa]s?|salud|enfermer[ií]a|cl[ií]nica|admisi[oó]n)\b/gi;
 const MIN_MEDICAL_TERMS = 2;
 const MIN_QUOTE_CHARS = 25;
+const MAX_CLAUSES = 25;
+const RISK_ORDER = { high: 0, medium: 1, low: 2 };
+// A refusal is reused for a day, then re-checked, so one bad AI verdict can't block a real form forever.
+const REFUSAL_CACHE_MS = 24 * 60 * 60 * 1000;
 const MIN_QUOTE_PART_CHARS = 12;
 const MAX_BODY_CHARS = 100000;
 const NVIDIA_MODEL = 'nvidia/nemotron-3.5-lightning-30b-a3b';
@@ -270,7 +274,9 @@ function parseClauses(raw, finishReason) {
       risk: normalizeRisk(c?.risk),
     }))
     .filter((c) => c.right && c.explanation && !isPlaceholder(c.right) && !isPlaceholder(c.explanation))
-    .filter((c, i, all) => all.findIndex((o) => sameClause(o, c)) === i);
+    .filter((c, i, all) => all.findIndex((o) => sameClause(o, c)) === i)
+    .sort((a, b) => RISK_ORDER[a.risk] - RISK_ORDER[b.risk])
+    .slice(0, MAX_CLAUSES);
 
   const summaryText = Array.isArray(answer.summary) ? answer.summary.filter((x) => typeof x === 'string').join(' ') : answer.summary;
   const summary = typeof summaryText === 'string' && !isPlaceholder(summaryText) ? summaryText.trim() : '';
@@ -297,7 +303,13 @@ function looksMedical(text) {
 // check is "found", "joined" (real passages stitched with "..."), "too_short" to prove anything, or "not_found".
 // Hyphens at PDF line breaks ("arbi- tration") are rejoined on both sides.
 function checkQuote(quote, documentText) {
-  const normalize = (s) => s.replace(/\u00ad/g, '').replace(/(\p{L})-\s+(\p{L})/gu, '$1$2').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+  const normalize = (s) => s
+    .normalize('NFKC') // PDF ligatures like "ﬁ" become "fi"
+    .replace(/[\u00ad\u200b-\u200d\u2060\ufeff]/g, '') // soft hyphens and invisible characters
+    .replace(/(\p{L})-\s+(\p{L})/gu, '$1$2')
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
+    .trim();
   const haystack = normalize(documentText);
   const parts = quote.split(/\.\.\.|…/).map(normalize).filter(Boolean);
   if (parts.join(' ').length < MIN_QUOTE_CHARS || parts.some((p) => p.length < MIN_QUOTE_PART_CHARS)) return 'too_short';
@@ -343,7 +355,7 @@ function sameClause(a, b) {
 }
 
 function normalizeRisk(value) {
-  const risk = String(value ?? '').toLowerCase();
+  const risk = String(value ?? '').toLowerCase().replace(/\bnot\s+(very\s+)?\w+/g, ' ');
   if (/high|critical|severe|serious/.test(risk)) return 'high';
   if (/low|minor/.test(risk)) return 'low';
   return 'medium';
@@ -502,7 +514,10 @@ async function findCached(env, hash) {
     }
     const [row] = await res.json();
     if (!row) return null;
-    if (row.out_of_scope) return { outOfScope: true, reason: 'ai', cached: true };
+    if (row.out_of_scope) {
+      if (Date.now() - Date.parse(row.created_at) > REFUSAL_CACHE_MS) return null;
+      return { outOfScope: true, reason: 'ai', cached: true };
+    }
     const { id, text, createdAt, documentName, ...analysis } = rowToAnalysis(row);
     return { ...analysis, cached: true, provider: 'cache', saved: true, analysisId: id };
   } catch (err) {

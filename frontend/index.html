@@ -181,6 +181,40 @@
 
     .run-meta { font-size: 0.8rem; color: var(--muted); margin: 4px 2px 16px; }
 
+    /* Tabs */
+    .tabs { display: flex; gap: 8px; margin-top: 16px; }
+    .tab {
+      font: inherit; font-size: 0.85rem; font-weight: 600; cursor: pointer;
+      color: #fff; background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.28);
+      border-radius: 999px; padding: 6px 14px;
+    }
+    .tab:hover { background: rgba(255, 255, 255, 0.2); }
+    .tab[aria-selected="true"] { background: #fff; color: var(--brand); border-color: #fff; }
+
+    /* History */
+    .history-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+    .history-head h2 { font-size: 1.1rem; font-weight: 650; }
+    .muted-note { color: var(--ink-2); font-size: 0.85rem; margin-top: 4px; }
+    .history-item {
+      display: flex; justify-content: space-between; gap: 16px; align-items: flex-start;
+      padding: 16px 0; border-top: 1px solid var(--hairline);
+    }
+    .history-item:first-child { border-top: none; }
+    .history-name { font-weight: 650; word-break: break-word; }
+    .history-date { color: var(--ink-2); font-size: 0.82rem; }
+    .history-summary { color: var(--ink-2); font-size: 0.88rem; margin-top: 6px; }
+    .mini-counts { display: flex; gap: 12px; margin-top: 6px; font-size: 0.82rem; color: var(--ink-2); }
+    .mini-counts span { display: inline-flex; align-items: center; gap: 5px; }
+    .mini-counts .icon { width: 10px; height: 10px; }
+    .history-actions { display: flex; gap: 8px; flex: none; }
+    #historyList .empty { padding: 20px 0 4px; }
+
+    .analyzed-text summary { cursor: pointer; color: var(--ink-2); font-size: 0.9rem; }
+    .analyzed-text pre {
+      white-space: pre-wrap; font: inherit; font-size: 0.85rem; color: var(--ink-2);
+      background: var(--page); border-radius: 8px; padding: 12px; margin-top: 10px; max-height: 360px; overflow: auto;
+    }
+
     .error-title { font-weight: 650; color: var(--high); margin-bottom: 6px; }
     details { margin-top: 12px; font-size: 0.85rem; }
     details summary { cursor: pointer; color: var(--ink-2); }
@@ -194,6 +228,7 @@
 
     @media (max-width: 560px) {
       header { padding: 22px 18px 28px; }
+      .history-item { flex-direction: column; }
       .card { padding: 18px; }
       .tiles { gap: 8px; }
       .tile { padding: 10px 12px; }
@@ -204,7 +239,7 @@
     @media print {
       body { background: #fff; }
       header { background: none; color: var(--ink); padding: 0 0 12px; }
-      #uploadCard, #progressCard, .actions, .clause-top button, .filter-note { display: none !important; }
+      #uploadCard, #progressCard, .actions, .clause-top button, .filter-note, .tabs, #historyView, .analyzed-text { display: none !important; }
       .clause { break-inside: avoid; box-shadow: 0 0 0 1px #ccc; }
       .clause[hidden] { display: block !important; }
       main { margin-top: 0; }
@@ -220,6 +255,10 @@
       <span class="pill">For patient advocates &amp; social workers</span>
     </div>
     <p>Upload a hospital admission document. Get a plain-English summary and every clause that waives a patient's rights, ranked by risk.</p>
+    <nav class="tabs" role="tablist" aria-label="Sections">
+      <button class="tab" type="button" role="tab" id="tabAnalyze" aria-selected="true">Analyze</button>
+      <button class="tab" type="button" role="tab" id="tabHistory" aria-selected="false">History</button>
+    </nav>
   </div>
 </header>
 
@@ -295,8 +334,25 @@
     </section>
 
     <div id="clauseList"></div>
+
+    <section class="card analyzed-text" id="textCard" hidden>
+      <details>
+        <summary>Show the text that was analyzed</summary>
+        <pre id="analyzedText"></pre>
+      </details>
+    </section>
+
     <p class="run-meta" id="runMeta"></p>
   </div>
+
+  <section class="card" id="historyView" hidden>
+    <div class="history-head">
+      <h2>History on this device</h2>
+    </div>
+    <p class="muted-note">Only analyses run in this browser appear here. Clearing your browser data removes this list, but saved analyses stay in the database until you delete them.</p>
+    <p class="notice" id="historyNotice" hidden></p>
+    <div id="historyList"></div>
+  </section>
 </main>
 
 <footer>
@@ -306,8 +362,11 @@
 </footer>
 
 <script>
-  pdfjsLib.GlobalWorkerOptions.workerSrc =
-    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  // If the PDF library fails to load, the rest of the page (History, errors) must still work.
+  if (window.pdfjsLib) {
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
 
   const ANALYZED_CHARS = 6000;
   const MAX_FILE_MB = 25;
@@ -318,7 +377,8 @@
   ];
 
   const $ = (id) => document.getElementById(id);
-  const state = { clauses: [], filter: null, report: null };
+  const HISTORY_KEY = 'patient-rights-analyzer:history';
+  const state = { clauses: [], filter: null, report: null, analyzeView: 'uploadCard' };
   let timer;
 
   const dropZone = $('dropZone');
@@ -340,6 +400,9 @@
   fileInput.addEventListener('change', () => { if (fileInput.files[0]) handleFile(fileInput.files[0]); });
 
   $('resetBtn').addEventListener('click', reset);
+  $('tabAnalyze').addEventListener('click', () => show(state.analyzeView));
+  $('tabHistory').addEventListener('click', openHistory);
+  updateHistoryTab();
   $('errorReset').addEventListener('click', reset);
   $('printBtn').addEventListener('click', () => window.print());
   $('copyBtn').addEventListener('click', () => copyText(reportText(), $('copyBtn')));
@@ -373,12 +436,14 @@
 
       setStep('done');
       clearInterval(timer);
+      if (data.analysisId) addToHistory(data.analysisId);
       renderResults({
         fileName: file.name,
         pages,
         pagesRead,
         truncated: text.length > ANALYZED_CHARS || pagesRead < pages,
         seconds: Math.round((Date.now() - startedAt) / 1000),
+        analyzedText: text.slice(0, ANALYZED_CHARS),
         ...data,
       });
     } catch (err) {
@@ -389,6 +454,9 @@
 
   // Stops once there is more text than gets analyzed, so huge PDFs don't have to be read in full.
   async function extractText(file) {
+    if (!window.pdfjsLib) {
+      throw new Error("The PDF reader didn't load, so this file can't be read. Check your internet connection and refresh the page.");
+    }
     let pdf;
     try {
       pdf = await pdfjsLib.getDocument({ data: await file.arrayBuffer() }).promise;
@@ -432,11 +500,16 @@
     state.filter = null;
     state.report = r;
 
+    const flagged = `${state.clauses.length} clause${state.clauses.length === 1 ? '' : 's'} flagged`;
     $('docName').textContent = r.fileName;
-    $('docMeta').textContent = `${r.pages} page${r.pages === 1 ? '' : 's'} · ${state.clauses.length} clause${state.clauses.length === 1 ? '' : 's'} flagged`;
+    $('docMeta').textContent = r.savedAt
+      ? `Saved ${formatDate(r.savedAt)} · ${flagged}`
+      : `${r.pages} page${r.pages === 1 ? '' : 's'} · ${flagged}`;
 
     setNotice('truncNotice', r.truncated &&
       `Only the first ${ANALYZED_CHARS.toLocaleString()} characters were analyzed${r.pages > 1 ? ` (roughly pages 1–${r.pagesRead} of ${r.pages})` : ''}. Clauses later in the document are not included.`);
+    $('analyzedText').textContent = r.analyzedText || '';
+    $('textCard').hidden = !r.analyzedText;
     setNotice('scopeNotice', r.inScope === false &&
       "This doesn't look like a hospital admission or consent document, so these results may not be meaningful.");
     setNotice('languageNotice', r.language && !/english/i.test(r.language) &&
@@ -449,8 +522,13 @@
     $('summaryText').textContent = r.summary || '';
     $('summaryCard').hidden = !r.summary;
 
-    const source = r.provider === 'cloudflare' ? 'Cloudflare AI (NVIDIA was too slow)' : 'NVIDIA';
-    $('runMeta').textContent = `Done in ${r.seconds}s · Answered by ${source}${r.saved ? ' · Saved to the database' : ''}`;
+    if (r.savedAt) {
+      $('runMeta').textContent = 'Opened from History.';
+    } else {
+      const source = r.provider === 'cloudflare' ? 'Cloudflare AI (NVIDIA was too slow)' : 'NVIDIA';
+      const saved = r.saved ? 'Saved to History' : "Not saved, so it won't appear in History";
+      $('runMeta').textContent = `Done in ${r.seconds}s · Answered by ${source} · ${saved}`;
+    }
 
     renderTiles();
     renderClauses();
@@ -560,7 +638,127 @@
   }
 
   function show(id) {
-    ['uploadCard', 'progressCard', 'errorCard', 'results'].forEach((section) => { $(section).hidden = section !== id; });
+    ['uploadCard', 'progressCard', 'errorCard', 'results', 'historyView'].forEach((section) => { $(section).hidden = section !== id; });
+    if (id !== 'historyView') state.analyzeView = id;
+    $('tabAnalyze').setAttribute('aria-selected', String(id !== 'historyView'));
+    $('tabHistory').setAttribute('aria-selected', String(id === 'historyView'));
+  }
+
+  function historyIds() {
+    try {
+      const ids = JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]');
+      return Array.isArray(ids) ? ids.filter((id) => typeof id === 'string') : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function setHistoryIds(ids) {
+    localStorage.setItem(HISTORY_KEY, JSON.stringify(ids.slice(0, 50)));
+    updateHistoryTab();
+  }
+
+  function addToHistory(id) {
+    setHistoryIds([id, ...historyIds().filter((x) => x !== id)]);
+  }
+
+  function updateHistoryTab() {
+    const n = historyIds().length;
+    $('tabHistory').textContent = n ? `History (${n})` : 'History';
+  }
+
+  async function openHistory() {
+    show('historyView');
+    const list = $('historyList');
+    setNotice('historyNotice', '');
+    const ids = historyIds();
+    if (ids.length === 0) {
+      list.innerHTML = `<div class="empty"><strong>No saved analyses yet</strong>Analyses you run in this browser will show up here.</div>`;
+      return;
+    }
+
+    list.innerHTML = '<p class="muted-note">Loading…</p>';
+    let data;
+    try {
+      const res = await fetch('/api/history', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      data = await res.json();
+      if (!res.ok) throw new Error(data.error || `Status ${res.status}`);
+    } catch (err) {
+      list.innerHTML = '';
+      setNotice('historyNotice', `Couldn't load history: ${err.message}`);
+      return;
+    }
+
+    const found = new Set(data.items.map((item) => item.id));
+    if (found.size !== ids.length) setHistoryIds(ids.filter((id) => found.has(id)));
+    if (data.items.length === 0) {
+      list.innerHTML = `<div class="empty"><strong>No saved analyses yet</strong>Analyses you run in this browser will show up here.</div>`;
+      return;
+    }
+
+    list.innerHTML = data.items.map((item) => `
+      <article class="history-item">
+        <div>
+          <div class="history-name">${esc(item.documentName)}</div>
+          <div class="history-date">${esc(formatDate(item.createdAt))}</div>
+          <div class="mini-counts">${RISKS.map(({ key, label }) => `<span><span class="icon ${key}" aria-hidden="true"></span>${item.counts[key]} ${label.toLowerCase()}</span>`).join('')}</div>
+          ${item.summary ? `<p class="history-summary">${esc(item.summary)}</p>` : ''}
+        </div>
+        <div class="history-actions">
+          <button class="btn btn-ghost btn-small" type="button" data-open="${esc(item.id)}">Open</button>
+          <button class="btn btn-ghost btn-small" type="button" data-delete="${esc(item.id)}" data-name="${esc(item.documentName)}">Delete</button>
+        </div>
+      </article>`).join('');
+    list.querySelectorAll('[data-open]').forEach((btn) => btn.addEventListener('click', () => openHistoryItem(btn.dataset.open)));
+    list.querySelectorAll('[data-delete]').forEach((btn) => btn.addEventListener('click', () => deleteHistoryItem(btn.dataset.delete, btn.dataset.name)));
+  }
+
+  async function openHistoryItem(id) {
+    try {
+      const res = await fetch(`/api/history/${encodeURIComponent(id)}`);
+      const item = await res.json();
+      if (res.status === 404) {
+        setHistoryIds(historyIds().filter((x) => x !== id));
+        await openHistory();
+        setNotice('historyNotice', 'That analysis no longer exists, so it was removed from this list.');
+        return;
+      }
+      if (!res.ok) throw new Error(item.error || `Status ${res.status}`);
+      renderResults({
+        fileName: item.documentName,
+        savedAt: item.createdAt,
+        truncated: (item.text || '').length >= ANALYZED_CHARS,
+        analyzedText: item.text,
+        summary: item.summary,
+        clauses: item.clauses,
+        inScope: item.inScope,
+        language: item.language,
+        notes: item.notes,
+      });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } catch (err) {
+      setNotice('historyNotice', `Couldn't open that analysis: ${err.message}`);
+    }
+  }
+
+  async function deleteHistoryItem(id, name) {
+    if (!confirm(`Delete "${name}"? This removes it from the database for good.`)) return;
+    try {
+      const res = await fetch(`/api/history/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error((await res.json()).error || `Status ${res.status}`);
+      setHistoryIds(historyIds().filter((x) => x !== id));
+      await openHistory();
+    } catch (err) {
+      setNotice('historyNotice', `Couldn't delete that analysis: ${err.message}`);
+    }
+  }
+
+  function formatDate(value) {
+    return new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
   }
 
   function reset() {

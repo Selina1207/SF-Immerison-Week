@@ -16,6 +16,7 @@
 | Model availability | Free NVIDIA endpoint. Two models were retired mid-build; this one may be too. |
 | Usage limits | 10 analyses per minute per internet connection. Everyone on one network (a classroom, for example) shares that limit. |
 | Testing | Edge cases across five axes, with fixture files, are in EDGE_CASES.md. `scripts/probe.mjs` red-teams the live site. There is no automated test suite in CI. |
+| Scope limit | Documents without at least 2 medical or hospital terms are refused before the AI runs. Documents the AI marks as out of scope are refused with no summary or clauses. A real hospital form the AI misjudges would be refused too, and there's no override. |
 | Language and scope | Tested on English hospital documents. The AI reports the language and whether the document is in scope, and the page warns when either looks off, but that detection can be wrong. |
 | Prompt injection | The document is sent as data with instructions to ignore any commands inside it. This lowers the risk; it doesn't remove it. |
 

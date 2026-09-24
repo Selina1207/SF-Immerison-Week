@@ -299,6 +299,13 @@
     <button class="btn btn-ghost" type="button" id="errorReset" style="margin-top:14px">Try another PDF</button>
   </section>
 
+  <section class="card" id="outOfScopeCard" hidden>
+    <p class="error-title" style="color: var(--ink)">This isn't a hospital admission document</p>
+    <p id="outOfScopeText"></p>
+    <p class="muted-note">This tool only reviews hospital admission, consent, and financial-responsibility forms, so it doesn't summarize other documents.</p>
+    <button class="btn btn-ghost" type="button" id="outOfScopeReset" style="margin-top:14px">Try another PDF</button>
+  </section>
+
   <div id="results" hidden>
     <section class="card">
       <div class="doc-head">
@@ -404,6 +411,7 @@
   $('tabHistory').addEventListener('click', openHistory);
   updateHistoryTab();
   $('errorReset').addEventListener('click', reset);
+  $('outOfScopeReset').addEventListener('click', reset);
   $('printBtn').addEventListener('click', () => window.print());
   $('copyBtn').addEventListener('click', () => copyText(reportText(), $('copyBtn')));
 
@@ -436,6 +444,13 @@
 
       setStep('done');
       clearInterval(timer);
+      if (data.outOfScope) {
+        $('outOfScopeText').textContent = data.reason === 'no-medical-terms'
+          ? "It doesn't use the medical or hospital terms these forms contain, so it wasn't sent to the AI."
+          : "The AI read it and it doesn't look like a hospital admission, consent, or financial-responsibility form.";
+        show('outOfScopeCard');
+        return;
+      }
       if (data.analysisId) addToHistory(data.analysisId);
       renderResults({
         fileName: file.name,
@@ -638,7 +653,7 @@
   }
 
   function show(id) {
-    ['uploadCard', 'progressCard', 'errorCard', 'results', 'historyView'].forEach((section) => { $(section).hidden = section !== id; });
+    ['uploadCard', 'progressCard', 'errorCard', 'outOfScopeCard', 'results', 'historyView'].forEach((section) => { $(section).hidden = section !== id; });
     if (id !== 'historyView') state.analyzeView = id;
     $('tabAnalyze').setAttribute('aria-selected', String(id !== 'historyView'));
     $('tabHistory').setAttribute('aria-selected', String(id === 'historyView'));

@@ -91,3 +91,19 @@ The live site and NVIDIA can't be reached from the build environment, so this ru
 | 2 | 1 | Summary returned as a list | Summary dropped | Lost the summary | Lists are joined into one paragraph |
 
 Round 3, after the fixes: 13 tries, 0 findings.
+
+### Rounds 4 and 5 (Sep 24): the duplicate cache, History, the word check, and real-PDF text quirks
+
+| Round | Sev | Input | Output | Why it is wrong | Fix |
+|---|---|---|---|---|---|
+| 4 | 3 | The AI wrongly refuses a real admission form once, and it's re-uploaded 3 days later | Still refused, with no AI re-check | One bad verdict blocked a real form forever, for everyone | Cached refusals expire after 24 hours, then the document is re-checked |
+| 4 | 2 | PDF text uses the `ﬁ` ligature ("beneﬁts") | Real quote marked "not found" | PDFs often contain ligature characters | Text is Unicode-normalized (NFKC) before matching |
+| 4 | 2 | PDF text has a zero-width space inside "arbitration" | Real quote marked "not found" | Invisible characters broke the match | Zero-width characters and soft hyphens are removed |
+| 4 | 2 | The model returns 400 clauses | 400 saved and shown | One reply could flood the database and the page | Capped at the 25 highest-risk clauses |
+| 4 | 1 | Risk written as "moderate, not high" | Shown as high | The negated word was matched | Negated words ("not high") are ignored |
+| 5 | 1 | A hospital financial agreement using "Guarantor" and "Medical Center" | Refused by the word check | A real in-scope form was blocked | Added guarantor, inpatient, and outpatient (still 2 distinct terms needed, so a lease with a guarantor is still refused) |
+
+Held up in round 4, with no finding: non-text fields from the model, 5,000 ids sent to `/api/history`, PostgREST filter injection through history ids, DELETE with a non-UUID id, and two different documents uploaded back to back (no cross-contamination from the cache).
+
+Round 5, after the fixes: 11 tries, 0 findings, and the 13 round-1–3 attacks still find 0.
+
